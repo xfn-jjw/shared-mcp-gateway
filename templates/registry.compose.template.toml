@@ -1,0 +1,63 @@
+# Shared MCP Gateway 容器内注册表模板。
+# 使用方式：
+# 1. 复制本文件，例如：cp templates/registry.compose.template.toml registry.compose.local.toml
+# 2. 根据容器内挂载路径，替换下面的 command / args / env
+# 3. Compose 启动时，把该文件挂载到容器内并通过 --registry 指定
+
+[listen]
+# 容器内通常监听 0.0.0.0，便于容器端口暴露。
+host = "0.0.0.0"
+port = 8787
+path = "/mcp"
+
+[gateway]
+# 网关名称，会显示给客户端。
+name = "shared-gateway"
+# 聚合后的工具名分隔符。
+namespace_separator = "."
+# 网关描述。
+description = "Shared MCP gateway for containerized deployment."
+
+[[servers]]
+# mempalace 容器内示例。
+key = "mempalace"
+enabled = true
+namespace = "mempalace"
+command = "/usr/local/bin/python"
+args = ["-m", "mempalace.mcp_server"]
+env = { PYTHONPATH = "/workspace/mempalace" }
+
+[[servers]]
+# mysql connector 容器内示例。
+key = "mysql-db"
+enabled = true
+namespace = "mysql_db"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/mysql-connector/server.py"]
+
+[[servers]]
+# obsidian-kb 容器内示例。
+key = "obsidian-kb"
+enabled = true
+namespace = "obsidian_kb"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/obsidian-kb-connector/server.py"]
+
+[[servers]]
+# tencent-cls 容器内示例。
+key = "tencent-cls"
+enabled = true
+namespace = "tencent_cls"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/tencent-cls-connector/server.py"]
+
+[local_exceptions.shared_gateway]
+# 记录被统一纳管的共享能力。
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+reason = "共享型 MCP 统一放入 shared-gateway，便于统一观测与配置管理。"
+
+[local_exceptions.openclaw]
+# 示例：仍保留本地直连的宿主能力。
+keep_local = ["openspace"]
+reason = "OpenSpace 强依赖宿主上下文与本地工作区，继续保留直连。"
+endpoint = "http://127.0.0.1:8081/mcp"

@@ -1,0 +1,47 @@
+[listen]
+host = "0.0.0.0"
+port = 8787
+path = "/mcp"
+
+[gateway]
+name = "shared-gateway"
+namespace_separator = "."
+description = "Shared MCP gateway for Codex, OpenCode and OpenClaw."
+
+[[servers]]
+key = "mempalace"
+enabled = true
+namespace = "mempalace"
+command = "/usr/local/bin/python"
+args = ["-m", "mempalace.mcp_server"]
+env = { PYTHONPATH = "/workspace/mempalace" }
+
+[[servers]]
+key = "mysql-db"
+enabled = true
+namespace = "mysql_db"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/mysql-connector/server.py"]
+
+[[servers]]
+key = "obsidian-kb"
+enabled = true
+namespace = "obsidian_kb"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/obsidian-kb-connector/server.py"]
+
+[[servers]]
+key = "tencent-cls"
+enabled = true
+namespace = "tencent_cls"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/tencent-cls-connector/server.py"]
+
+[local_exceptions.shared_gateway]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+reason = "共享型 MCP，适合放进 shared-gateway 统一纳管。"
+
+[local_exceptions.openclaw]
+keep_local = ["openspace"]
+reason = "OpenSpace 强依赖 OpenClaw 宿主上下文与本地工作区能力，保留本地直连。"
+endpoint = "http://127.0.0.1:8081/mcp"

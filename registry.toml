@@ -1,0 +1,55 @@
+[listen]
+host = "127.0.0.1"
+port = 8787
+path = "/mcp"
+
+[gateway]
+name = "shared-gateway"
+namespace_separator = "."
+description = "Shared MCP gateway for Codex, OpenCode and OpenClaw."
+
+[clients.codex]
+config_path = "/Users/jervis.jiang/.codex/config.toml"
+
+[clients.opencode]
+config_path = "/Users/jervis.jiang/.config/opencode/opencode.jsonc"
+
+[clients.openclaw]
+config_path = "/Users/jervis.jiang/.openclaw/workspace/mcp.json"
+
+[[servers]]
+key = "mempalace"
+enabled = true
+namespace = "mempalace"
+command = "/Users/jervis.jiang/jervis.jiang/mempalace/.venv/bin/python"
+args = ["-m", "mempalace.mcp_server"]
+
+[[servers]]
+key = "mysql-db"
+enabled = true
+namespace = "mysql_db"
+command = "/bin/bash"
+args = ["-lc", "cd /Users/jervis.jiang/jervis.jiang/mcps/mysql-connector && ./.venv/bin/python server.py"]
+
+[[servers]]
+key = "obsidian-kb"
+enabled = true
+namespace = "obsidian_kb"
+command = "/bin/bash"
+args = ["-lc", "cd /Users/jervis.jiang/jervis.jiang/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/Users/jervis.jiang/.openclaw/workspace ./.venv/bin/python server.py"]
+
+[[servers]]
+key = "tencent-cls"
+enabled = true
+namespace = "tencent_cls"
+command = "/bin/bash"
+args = ["-lc", "cd /Users/jervis.jiang/jervis.jiang/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
+
+[local_exceptions.shared_gateway]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+reason = "共享型 MCP，适合放进 shared-gateway 统一纳管。"
+
+[local_exceptions.openclaw]
+keep_local = ["openspace"]
+reason = "OpenSpace 强依赖 OpenClaw 宿主上下文与本地工作区能力，保留本地直连。"
+endpoint = "http://127.0.0.1:8081/mcp"

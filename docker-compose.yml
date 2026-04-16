@@ -1,0 +1,23 @@
+services:
+  shared-mcp-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shared-mcp-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      OBSIDIAN_VAULT_PATH: /workspace/openclaw-workspace
+      PYTHONPATH: /workspace/mempalace
+    volumes:
+      - /Users/jervis.jiang/jervis.jiang/mcps:/workspace/mcps:ro
+      - /Users/jervis.jiang/jervis.jiang/mempalace:/workspace/mempalace:ro
+      - /Users/jervis.jiang/.openclaw/workspace:/workspace/openclaw-workspace:rw
+      - /Users/jervis.jiang/.mempalace:/root/.mempalace:rw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=5).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s

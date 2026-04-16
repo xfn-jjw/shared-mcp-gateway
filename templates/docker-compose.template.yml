@@ -1,0 +1,26 @@
+services:
+  shared-mcp-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shared-mcp-gateway
+    restart: unless-stopped
+    ports:
+      # 把容器内 8787 暴露到宿主机，仅绑定本机回环地址。
+      - "127.0.0.1:8787:8787"
+    environment:
+      # 根据你的下游 MCP 实际依赖补充环境变量。
+      OBSIDIAN_VAULT_PATH: /workspace/openclaw-workspace
+      PYTHONPATH: /workspace/mempalace
+    volumes:
+      # 下面这些路径请替换成你自己的绝对路径。
+      - /absolute/path/to/mcps:/workspace/mcps:ro
+      - /absolute/path/to/mempalace:/workspace/mempalace:ro
+      - /absolute/path/to/openclaw-workspace:/workspace/openclaw-workspace:rw
+      - /absolute/path/to/mempalace-data:/root/.mempalace:rw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=5).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s

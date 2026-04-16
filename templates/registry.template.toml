@@ -1,0 +1,78 @@
+# Shared MCP Gateway 注册表模板。
+# 使用方式：
+# 1. 复制本文件，例如：cp templates/registry.template.toml registry.local.toml
+# 2. 按实际环境替换下面的路径、端口、命令与参数
+# 3. 启动：python3 shared_mcp_gateway/gateway.py --registry registry.local.toml --log-level INFO
+
+[listen]
+# 网关监听地址。仅本机访问时建议保持 127.0.0.1。
+host = "127.0.0.1"
+# 网关监听端口。
+port = 8787
+# 对外暴露的 MCP HTTP 路径。
+path = "/mcp"
+
+[gateway]
+# 网关名称，会显示给 MCP Client。
+name = "shared-gateway"
+# 聚合后工具名的分隔符，例如 mysql_db.ping_db。
+namespace_separator = "."
+# 网关描述信息。
+description = "Shared MCP gateway for Codex, OpenCode and OpenClaw."
+
+[clients.codex]
+# 可选：记录 Codex 配置文件位置，便于后续脚本生成或人工维护。
+config_path = "/Users/your-name/.codex/config.toml"
+
+[clients.opencode]
+# 可选：记录 OpenCode 配置文件位置。
+config_path = "/Users/your-name/.config/opencode/opencode.jsonc"
+
+[clients.openclaw]
+# 可选：记录 OpenClaw 配置文件位置。
+config_path = "/Users/your-name/.openclaw/workspace/mcp.json"
+
+[[servers]]
+# 服务唯一 key，用于日志、自检与熔断状态标识。
+key = "mempalace"
+enabled = true
+# 聚合后的命名空间前缀。
+namespace = "mempalace"
+# 启动该 MCP Server 的命令。
+command = "/absolute/path/to/mempalace/.venv/bin/python"
+# 启动参数。
+args = ["-m", "mempalace.mcp_server"]
+# 可选：只对当前下游生效的环境变量。
+env = { PYTHONPATH = "/absolute/path/to/mempalace" }
+
+[[servers]]
+key = "mysql-db"
+enabled = true
+namespace = "mysql_db"
+command = "/bin/bash"
+args = ["-lc", "cd /absolute/path/to/mcps/mysql-connector && ./.venv/bin/python server.py"]
+
+[[servers]]
+key = "obsidian-kb"
+enabled = true
+namespace = "obsidian_kb"
+command = "/bin/bash"
+args = ["-lc", "cd /absolute/path/to/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/absolute/path/to/obsidian-vault ./.venv/bin/python server.py"]
+
+[[servers]]
+key = "tencent-cls"
+enabled = true
+namespace = "tencent_cls"
+command = "/bin/bash"
+args = ["-lc", "cd /absolute/path/to/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
+
+[local_exceptions.shared_gateway]
+# 记录当前由 shared-gateway 统一托管的共享能力。
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+reason = "共享型 MCP 统一纳管，减少多客户端重复配置。"
+
+[local_exceptions.openclaw]
+# 记录必须保留本地直连的能力。
+keep_local = ["openspace"]
+reason = "OpenSpace 强依赖宿主上下文与工作区能力，保留本地直连。"
+endpoint = "http://127.0.0.1:8081/mcp"

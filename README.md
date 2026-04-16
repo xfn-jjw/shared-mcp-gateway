@@ -55,6 +55,10 @@ shared-mcp-gateway/
 ├── docs/
 │   └── mcp-topology.md                 # 哪些 MCP 进入网关、哪些保留本地特例
 ├── generated/                          # 自动生成的客户端配置文件
+├── templates/                          # 可复制的配置模板
+│   ├── docker-compose.template.yml     # Compose 配置模板
+│   ├── registry.compose.template.toml  # 容器内注册表模板
+│   └── registry.template.toml          # 宿主机注册表模板
 ├── scripts/
 │   ├── render_client_configs.py        # 生成客户端配置片段
 │   └── self_check.py                   # 健康检查与关键工具自检
@@ -64,9 +68,6 @@ shared-mcp-gateway/
 │   ├── logging_utils.py                # 结构化日志输出
 │   ├── render.py                       # 客户端配置渲染
 │   └── stdio_bridge.py                 # stdio 客户端到 HTTP MCP 的桥接
-└── templates/
-    ├── docker-compose.template.yml     # Compose 配置模板
-    └── registry.template.toml          # 注册表模板
 ```
 
 ## 核心工作方式
@@ -97,12 +98,14 @@ pip install -r requirements.txt
 你可以直接参考模板文件：
 
 - `templates/registry.template.toml`
+- `templates/registry.compose.template.toml`
 - `templates/docker-compose.template.yml`
 
 最常见的做法是：
 
 ```bash
 cp templates/registry.template.toml registry.local.toml
+cp templates/registry.compose.template.toml registry.compose.local.toml
 cp templates/docker-compose.template.yml docker-compose.local.yml
 ```
 
@@ -285,7 +288,24 @@ services:
 cp templates/registry.template.toml registry.local.toml
 ```
 
-### 2. Compose 模板
+
+### 2. 容器内注册表模板
+
+文件：`templates/registry.compose.template.toml`
+
+用途：
+
+- 给 Docker / Compose 场景提供容器内路径版本的注册表模板。
+- 避免把宿主机绝对路径误带入容器配置。
+- 适合作为 `registry.compose.toml` 的可复制起点。
+
+建议使用方式：
+
+```bash
+cp templates/registry.compose.template.toml registry.compose.local.toml
+```
+
+### 3. Compose 模板
 
 文件：`templates/docker-compose.template.yml`
 
@@ -300,6 +320,22 @@ cp templates/registry.template.toml registry.local.toml
 ```bash
 cp templates/docker-compose.template.yml docker-compose.local.yml
 ```
+
+## 配置落地建议
+
+为了减少环境问题，建议按下面顺序落地：
+
+1. 先复制模板文件，不要直接修改项目内现成样例。
+2. 先确保每个下游 MCP Server 单独可启动。
+3. 再把下游服务逐个写入 `registry.toml` 或 `registry.compose.toml`。
+4. 启动网关后，先检查 `/healthz`，再执行 `scripts/self_check.py`。
+5. 最后执行 `scripts/render_client_configs.py`，同步客户端接入配置。
+
+推荐区分三类文件：
+
+- `registry.toml`：宿主机直跑配置
+- `registry.compose.toml`：容器内运行配置
+- `templates/*.template.*`：新环境初始化模板
 
 ## 常用命令
 
@@ -353,6 +389,6 @@ docker compose logs -f shared-mcp-gateway
 
 - `README.md`
 - `templates/registry.template.toml`
+- `templates/registry.compose.template.toml`
 - `templates/docker-compose.template.yml`
 - `docs/mcp-topology.md`
-# shared-mcp-gateway
