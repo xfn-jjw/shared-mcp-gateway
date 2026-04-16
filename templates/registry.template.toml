@@ -20,6 +20,10 @@ namespace_separator = "."
 # 网关描述信息。
 description = "Shared MCP gateway for Codex, OpenCode and OpenClaw."
 
+# clients 段本身不会参与运行时转发，
+# 主要用于记录“当前环境里各客户端配置文件放在哪里”，
+# 方便脚本生成、人工排查或团队交接。
+
 [clients.codex]
 # 可选：记录 Codex 配置文件位置，便于后续脚本生成或人工维护。
 config_path = "/Users/your-name/.codex/config.toml"
@@ -45,7 +49,13 @@ args = ["-m", "mempalace.mcp_server"]
 # 可选：只对当前下游生效的环境变量。
 env = { PYTHONPATH = "/absolute/path/to/mempalace" }
 
+# 约定：
+# - key 用于标识“下游实例”
+# - namespace 用于标识“对外暴露名字前缀”
+# 两者可以相同，也可以不同，但建议保持语义稳定，方便日志排查。
+
 [[servers]]
+# mysql 示例：适合通过 bash -lc 先切目录，再使用项目自己的虚拟环境启动。
 key = "mysql-db"
 enabled = true
 namespace = "mysql_db"
@@ -53,6 +63,7 @@ command = "/bin/bash"
 args = ["-lc", "cd /absolute/path/to/mcps/mysql-connector && ./.venv/bin/python server.py"]
 
 [[servers]]
+# obsidian 示例：演示如何把某个下游依赖的环境变量直接内联到启动命令里。
 key = "obsidian-kb"
 enabled = true
 namespace = "obsidian_kb"
@@ -60,6 +71,7 @@ command = "/bin/bash"
 args = ["-lc", "cd /absolute/path/to/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/absolute/path/to/obsidian-vault ./.venv/bin/python server.py"]
 
 [[servers]]
+# tencent-cls 示例：结构与 mysql / obsidian 类似，保持统一治理即可。
 key = "tencent-cls"
 enabled = true
 namespace = "tencent_cls"
@@ -76,3 +88,7 @@ reason = "共享型 MCP 统一纳管，减少多客户端重复配置。"
 keep_local = ["openspace"]
 reason = "OpenSpace 强依赖宿主上下文与工作区能力，保留本地直连。"
 endpoint = "http://127.0.0.1:8081/mcp"
+
+# local_exceptions 的用途主要是“说明拓扑决策”，
+# 不是网关转发时的硬编码白名单；
+# 它更偏向文档化配置，便于 README / healthz / 排查时理解为什么某些能力没有进网关。

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 from .config import Registry
 
 
-# 固定 bridge Python 解释器，确保客户端侧启动时与网关运行环境一致。
-PYTHON_BIN = Path('/Users/jervis.jiang/jervis.jiang/OpenSpace/.venv/bin/python')
+# 默认优先复用当前执行渲染脚本的 Python 解释器，避免把开发者本机绝对路径写死到产物里。
+# 如果调用方明确希望使用其他解释器，也可以通过环境变量覆盖。
+PYTHON_BIN = Path(os.environ.get('SHARED_MCP_GATEWAY_PYTHON', sys.executable)).resolve()
 
 
 def _bridge_command(project_root: Path, registry: Registry, caller: str) -> str:

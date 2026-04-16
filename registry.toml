@@ -1,55 +1,78 @@
+# Shared MCP Gateway 宿主机直跑默认示例。
+# 说明：
+# 1. 下面内容是案例配置，用于展示宿主机直跑时的推荐结构。
+# 2. 落地到你的环境时，只需要替换绝对路径、端口和下游 MCP 启动命令。
+# 3. 更通用的复制模板请参考：templates/registry.template.toml
+
 [listen]
+# 网关监听地址。仅本机访问时建议保持 127.0.0.1。
 host = "127.0.0.1"
+# 网关监听端口。
 port = 8787
+# 对外暴露的 MCP HTTP 路径。
 path = "/mcp"
 
 [gateway]
+# 网关名称，会显示给 MCP Client。
 name = "shared-gateway"
+# 聚合后工具名的命名空间分隔符，例如 mysql_db.ping_db。
 namespace_separator = "."
-description = "Shared MCP gateway for Codex, OpenCode and OpenClaw."
+# 当前示例以宿主机直跑场景为主。
+description = "Shared MCP gateway for local development."
 
 [clients.codex]
-config_path = "/Users/jervis.jiang/.codex/config.toml"
+# 可选元信息：记录 Codex 配置文件位置，便于人工维护或后续脚本接入。
+# 注意：当前项目不会自动写入该路径。
+config_path = "~/.codex/config.toml"
 
 [clients.opencode]
-config_path = "/Users/jervis.jiang/.config/opencode/opencode.jsonc"
+# 可选元信息：记录 OpenCode 配置文件位置。
+config_path = "~/.config/opencode/opencode.jsonc"
 
 [clients.openclaw]
-config_path = "/Users/jervis.jiang/.openclaw/workspace/mcp.json"
+# 可选元信息：记录 OpenClaw 配置文件位置。
+config_path = "~/.openclaw/workspace/mcp.json"
 
 [[servers]]
+# mempalace：共享记忆 / 知识能力。
 key = "mempalace"
 enabled = true
 namespace = "mempalace"
-command = "/Users/jervis.jiang/jervis.jiang/mempalace/.venv/bin/python"
+command = "/opt/mempalace/.venv/bin/python"
 args = ["-m", "mempalace.mcp_server"]
+env = { PYTHONPATH = "/opt/mempalace" }
 
 [[servers]]
+# mysql-db：MySQL 只读查询能力。
 key = "mysql-db"
 enabled = true
 namespace = "mysql_db"
 command = "/bin/bash"
-args = ["-lc", "cd /Users/jervis.jiang/jervis.jiang/mcps/mysql-connector && ./.venv/bin/python server.py"]
+args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 
 [[servers]]
+# obsidian-kb：Obsidian Vault 知识库读写能力。
 key = "obsidian-kb"
 enabled = true
 namespace = "obsidian_kb"
 command = "/bin/bash"
-args = ["-lc", "cd /Users/jervis.jiang/jervis.jiang/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/Users/jervis.jiang/.openclaw/workspace ./.venv/bin/python server.py"]
+args = ["-lc", "cd /opt/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/opt/openclaw-workspace ./.venv/bin/python server.py"]
 
 [[servers]]
+# tencent-cls：腾讯云 CLS 日志检索能力。
 key = "tencent-cls"
 enabled = true
 namespace = "tencent_cls"
 command = "/bin/bash"
-args = ["-lc", "cd /Users/jervis.jiang/jervis.jiang/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
+args = ["-lc", "cd /opt/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
 
 [local_exceptions.shared_gateway]
+# 当前由 shared-gateway 统一纳管的共享能力。
 managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
-reason = "共享型 MCP，适合放进 shared-gateway 统一纳管。"
+reason = "共享型 MCP 适合统一收口、统一日志与统一自检。"
 
 [local_exceptions.openclaw]
+# 仍保留本地直连的宿主特例。
 keep_local = ["openspace"]
 reason = "OpenSpace 强依赖 OpenClaw 宿主上下文与本地工作区能力，保留本地直连。"
 endpoint = "http://127.0.0.1:8081/mcp"

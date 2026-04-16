@@ -82,12 +82,72 @@ flowchart LR
     C --> G["tencent-cls"]
 ```
 
+## 运行链路说明
+
+一次 MCP 请求进入共享网关后，关键路径如下：
+
+1. 客户端通过 `stdio_bridge.py` 或直接通过 HTTP 访问共享网关。
+2. `RequestLoggingMiddleware` 注入 `caller`、`request_id`、访问日志上下文。
+3. `SharedMcpGateway` 依据工具名 / 资源 URI / prompt 名定位目标下游。
+4. 若对应下游已被熔断，请求会被快速拒绝，避免持续打到异常服务。
+5. 若允许转发，请求进入 `DownstreamConnection`，通过单 session 锁串行访问下游 MCP。
+6. 调用完成后更新 metrics、failure streak、circuit breaker，并同步到 heartbeat / healthz。
+
+核心模块职责建议按下面理解：
+
+- `shared_mcp_gateway/config.py`：注册表解析与强类型配置对象。
+- `shared_mcp_gateway/gateway.py`：统一索引、请求转发、熔断隔离、健康检查、心跳日志。
+- `shared_mcp_gateway/stdio_bridge.py`：给只支持 stdio 的客户端提供 HTTP 网关桥接层。
+- `shared_mcp_gateway/render.py`：把统一注册表渲染成不同客户端的接入配置。
+- `scripts/self_check.py`：从健康接口和真实 MCP 调用两个维度做联通性自检。
+
+## 请求时序图
+
+下面这张图更适合对应代码阅读时建立整体心智模型：
+
+```mermaid
+sequenceDiagram
+    participant Client as "MCP Client"
+    participant Bridge as "stdio_bridge / HTTP Client"
+    participant Middleware as "RequestLoggingMiddleware"
+    participant Gateway as "SharedMcpGateway"
+    participant Breaker as "CircuitBreaker"
+    participant Downstream as "DownstreamConnection"
+    participant Server as "Downstream MCP Server"
+
+    Client->>Bridge: 发起 list_tools / call_tool / read_resource
+    Bridge->>Middleware: HTTP 请求进入网关
+    Middleware->>Gateway: 注入 caller / request_id 后转发
+    Gateway->>Breaker: 检查目标下游是否允许访问
+    alt breaker open
+        Breaker-->>Gateway: reject
+        Gateway-->>Client: 快速失败 / 返回熔断提示
+    else breaker closed
+        Gateway->>Downstream: 按 namespace 路由请求
+        Downstream->>Server: 串行发起 MCP 调用
+        Server-->>Downstream: 返回结果或异常
+        Downstream-->>Gateway: 返回标准 MCP 响应
+        Gateway->>Gateway: 更新 metrics / failure streak / breaker
+        Gateway-->>Client: 返回聚合后的 MCP 响应
+    end
+```
+
+## 阅读代码建议
+
+如果要快速看懂主链路，建议按这个顺序读：
+
+1. `shared_mcp_gateway/config.py`：先理解注册表结构。
+2. `shared_mcp_gateway/render.py`：理解客户端接入配置是怎么生成的。
+3. `shared_mcp_gateway/stdio_bridge.py`：理解 stdio 客户端如何接到 HTTP 网关。
+4. `shared_mcp_gateway/gateway.py`：重点看 `SharedMcpGateway`、`DownstreamConnection`、`RequestLoggingMiddleware`。
+5. `scripts/self_check.py`：理解上线后如何验证“接口活着”和“真实能力可用”。
+
 ## 快速开始
 
 ### 1. 安装依赖
 
 ```bash
-cd /Users/jervis.jiang/jervis.jiang/shared-mcp-gateway
+cd /path/to/shared-mcp-gateway
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -138,7 +198,7 @@ docker compose down
 
 ## 如何配置：核心配置说明
 
-项目的核心配置文件是 `registry.toml`，主要包含四部分：
+项目的核心配置文件是 `registry.toml`，主要包含五部分：
 
 ### 1. 监听配置
 
@@ -200,6 +260,20 @@ endpoint = "http://127.0.0.1:8081/mcp"
 ```
 
 用于记录哪些能力不走共享网关，而是继续保留本地直连。
+
+
+### 5. 客户端配置路径元信息（可选）
+
+```toml
+[clients.codex]
+config_path = "~/.codex/config.toml"
+```
+
+含义：
+
+- `clients.*` 主要用于记录目标客户端配置文件所在位置。
+- 当前项目默认**不会自动写回**这些路径。
+- 更推荐先运行 `scripts/render_client_configs.py`，再把生成结果复制到对应客户端配置里。
 
 ## 如何配置：案例
 
@@ -321,6 +395,74 @@ cp templates/registry.compose.template.toml registry.compose.local.toml
 cp templates/docker-compose.template.yml docker-compose.local.yml
 ```
 
+
+## 客户端接入示例
+
+推荐接入流程：
+
+1. 先启动 shared-gateway，并确认 `http://127.0.0.1:8787/healthz` 正常。
+2. 执行 `python3 scripts/render_client_configs.py` 生成当前环境下的客户端配置片段。
+3. 优先复制 `generated/` 目录里的实际产物，不要手写环境相关路径。
+
+### Codex 接入示例
+
+更推荐直接使用 `generated/codex-mcp.toml`。其结构大致如下：
+
+```toml
+[mcp_servers.shared-gateway]
+command = "/bin/bash"
+args = ["-lc", "python3 /absolute/path/to/shared_mcp_gateway/stdio_bridge.py --url http://127.0.0.1:8787/mcp --caller codex"]
+enabled = true
+```
+
+### OpenCode 接入示例
+
+更推荐直接使用 `generated/opencode-mcp.jsonc`。其结构大致如下：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "shared-gateway": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "/bin/bash",
+        "-lc",
+        "python3 /absolute/path/to/shared_mcp_gateway/stdio_bridge.py --url http://127.0.0.1:8787/mcp --caller opencode"
+      ]
+    }
+  }
+}
+```
+
+### OpenClaw 接入示例
+
+OpenClaw 可以直接走 HTTP MCP，推荐直接使用 `generated/openclaw-mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "shared-gateway": {
+      "url": "http://127.0.0.1:8787/mcp",
+      "transport": "streamable-http",
+      "connectionTimeoutMs": 10000,
+      "disabled": false
+    }
+  }
+}
+```
+
+### Claude Code 接入思路
+
+当前项目已经支持通过 `stdio_bridge.py` 给 `claude-code` 注入调用方标识。核心思路是把 bridge 作为本地 stdio MCP 命令：
+
+```bash
+python3 /absolute/path/to/shared_mcp_gateway/stdio_bridge.py --url http://127.0.0.1:8787/mcp --caller claude-code
+```
+
+如果你的客户端配置体系允许自定义 stdio MCP command，直接复用这条 bridge 命令即可。
+
 ## 配置落地建议
 
 为了减少环境问题，建议按下面顺序落地：
@@ -345,6 +487,12 @@ cp templates/docker-compose.template.yml docker-compose.local.yml
 python3 scripts/render_client_configs.py
 ```
 
+这个脚本会：
+
+- 读取 `registry.toml`
+- 统一生成 Codex / OpenCode / OpenClaw 的配置片段
+- 避免手工复制 bridge 启动命令时产生配置漂移
+
 生成结果位于：
 
 - `generated/codex-mcp.toml`
@@ -357,6 +505,11 @@ python3 scripts/render_client_configs.py
 python3 scripts/self_check.py
 python3 scripts/self_check.py --json
 ```
+
+默认会执行两类检查：
+
+- `healthz`：检查网关是否正常暴露、下游是否缺失、熔断器是否打开。
+- `gateway_tools`：直接以 MCP 客户端身份连到网关，检查关键工具是否存在，并执行无副作用探活。
 
 ### 查看日志
 
@@ -371,7 +524,7 @@ docker compose logs -f shared-mcp-gateway
 - `obsidian-kb`
 - `tencent-cls`
 
-拓扑归位说明见：`/Users/jervis.jiang/jervis.jiang/shared-mcp-gateway/docs/mcp-topology.md`
+拓扑归位说明见：`/path/to/shared-mcp-gateway/docs/mcp-topology.md`
 
 ## 后续建议
 

@@ -4,9 +4,17 @@
 # Python cache
 __pycache__/
 *.pyc
+.venv/
 
 # macOS
 .DS_Store
+
+# Local runtime/config files
+registry.local.toml
+registry.compose.local.toml
+docker-compose.local.yml
+.env
+.env.*
 
 # Generated backup artifacts
 generated/*.bak.*

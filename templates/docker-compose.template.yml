@@ -1,9 +1,12 @@
 services:
   shared-mcp-gateway:
+    # 直接使用当前项目 Dockerfile 构建镜像，便于保持代码与运行环境一致。
     build:
       context: .
       dockerfile: Dockerfile
+    # 固定容器名，方便 docker ps / logs / exec 时快速定位。
     container_name: shared-mcp-gateway
+    # 网关是基础设施型组件，建议默认随宿主机重启自动拉起。
     restart: unless-stopped
     ports:
       # 把容器内 8787 暴露到宿主机，仅绑定本机回环地址。
@@ -14,13 +17,21 @@ services:
       PYTHONPATH: /workspace/mempalace
     volumes:
       # 下面这些路径请替换成你自己的绝对路径。
+      # 原则：
+      # - 代码目录优先只读挂载，降低误改风险；
+      # - 运行数据目录单独 rw 挂载，便于持久化。
       - /absolute/path/to/mcps:/workspace/mcps:ro
       - /absolute/path/to/mempalace:/workspace/mempalace:ro
       - /absolute/path/to/openclaw-workspace:/workspace/openclaw-workspace:rw
       - /absolute/path/to/mempalace-data:/root/.mempalace:rw
     healthcheck:
+      # 用 healthz 做容器探活，确保“端口可连”和“网关逻辑已起来”是同一件事。
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=5).read()"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 20s
+
+# 如果你后续要扩展：
+# - 新增共享型 MCP，优先修改 registry.compose.toml，而不是直接堆 environment；
+# - 新增宿主专属能力，优先记到 local_exceptions，并在文档里说明不进网关的原因。
