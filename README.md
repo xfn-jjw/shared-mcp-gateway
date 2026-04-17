@@ -237,6 +237,8 @@ description = "Shared MCP gateway for Codex, OpenCode and OpenClaw."
 key = "mysql-db"
 enabled = true
 namespace = "mysql_db"
+language = "Python"
+description = "MySQL 只读查询能力"
 command = "/bin/bash"
 args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 ```
@@ -246,6 +248,8 @@ args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 - `key`：下游服务唯一标识
 - `enabled`：是否启用
 - `namespace`：工具名前缀命名空间
+- `language`：可选，dashboard 展示的实现语言；不填时会按命令做启发式推断
+- `description`：可选，dashboard 中展示“这个 MCP 是干什么的”的说明
 - `command`：启动命令
 - `args`：启动参数
 - `env`：可选，给该服务单独注入环境变量

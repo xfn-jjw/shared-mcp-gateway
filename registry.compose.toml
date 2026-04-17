@@ -23,6 +23,8 @@ description = "Shared MCP gateway for containerized deployment."
 key = "mempalace"
 enabled = true
 namespace = "mempalace"
+language = "Python"
+description = "共享记忆与知识图谱能力，用于写入/检索长期记忆、关系事实、语义搜索与时间线查询。"
 command = "/usr/local/bin/python"
 args = ["-m", "mempalace.mcp_server"]
 env = { PYTHONPATH = "/workspace/mempalace" }
@@ -32,6 +34,8 @@ env = { PYTHONPATH = "/workspace/mempalace" }
 key = "mysql-db"
 enabled = true
 namespace = "mysql_db"
+language = "Python"
+description = "MySQL 只读查询能力，用于查看表结构、索引、数据记录，以及执行安全的 SELECT / SHOW / EXPLAIN。"
 command = "/usr/local/bin/python"
 args = ["/workspace/mcps/mysql-connector/server.py"]
 
@@ -40,6 +44,8 @@ args = ["/workspace/mcps/mysql-connector/server.py"]
 key = "obsidian-kb"
 enabled = true
 namespace = "obsidian_kb"
+language = "Python"
+description = "Obsidian 知识库读写能力，用于搜索、读取、更新笔记，以及查看反向链接。"
 command = "/usr/local/bin/python"
 args = ["/workspace/mcps/obsidian-kb-connector/server.py"]
 
@@ -48,6 +54,8 @@ args = ["/workspace/mcps/obsidian-kb-connector/server.py"]
 key = "tencent-cls"
 enabled = true
 namespace = "tencent_cls"
+language = "Python"
+description = "腾讯云 CLS 日志检索能力，用于登录控制台并按 traceId 拉取完整日志，辅助排障。"
 command = "/usr/local/bin/python"
 args = ["/workspace/mcps/tencent-cls-connector/server.py"]
 
@@ -58,6 +66,8 @@ args = ["/workspace/mcps/tencent-cls-connector/server.py"]
 key = "openspace"
 enabled = true
 namespace = "openspace"
+language = "Python"
+description = "通用任务执行与技能编排能力，用于搜索技能、执行多步任务、演化并上传技能。"
 command = "/usr/local/bin/python"
 args = ["-m", "openspace.mcp_server"]
 env = { PYTHONPATH = "/workspace/OpenSpace", OPENSPACE_HOST_SKILL_DIRS = "/workspace/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/workspace/OpenSpace", OPENSPACE_BACKEND_SCOPE = "shell,mcp,system" }

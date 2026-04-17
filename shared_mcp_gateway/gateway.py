@@ -353,12 +353,22 @@ class DownstreamConnection:
         return {
             "namespace": self.config.namespace,
             "serverKey": self.config.key,
+            "description": self.config.description,
             "serverInfo": self.server_info.model_dump(mode="json") if self.server_info else None,
             "catalog": {
                 "tools": len(self.tools),
                 "resources": len(self.resources),
                 "resourceTemplates": len(self.resource_templates),
                 "prompts": len(self.prompts),
+                # dashboard 展开明细时直接复用这份轻量工具清单，避免前端二次拼接。
+                "toolList": [
+                    {
+                        "name": tool.name,
+                        "title": tool.title,
+                        "description": tool.description,
+                    }
+                    for tool in sorted(self.tools.values(), key=lambda item: item.name)
+                ],
             },
         }
 
@@ -1453,6 +1463,7 @@ def _build_recent_client_rows(recent_logs: list[dict[str, Any]]) -> list[dict[st
                 "errorCount": 0,
                 "lastPath": event.get("path"),
                 "lastTool": event.get("tool"),
+                "lastDownstream": event.get("downstream"),
             }
             grouped[client_ip] = row
 
@@ -1467,6 +1478,8 @@ def _build_recent_client_rows(recent_logs: list[dict[str, Any]]) -> list[dict[st
             row["lastPath"] = event.get("path")
         if not row.get("lastTool") and event.get("tool"):
             row["lastTool"] = event.get("tool")
+        if not row.get("lastDownstream") and event.get("downstream"):
+            row["lastDownstream"] = event.get("downstream")
 
     return sorted(grouped.values(), key=lambda item: (-(item["toolCalls"] + item["httpRequests"]), item["clientIp"]))
 
@@ -1535,16 +1548,21 @@ def _build_dashboard_payload(gateway: "SharedMcpGateway") -> dict[str, Any]:
             or breaker.get("lastTracebackSummary")
             or ("连接正常" if is_alive else "尚未连接")
         )
+        server_description = server.description or (summary.get("description") if summary else None)
 
         server_rows.append(
             {
                 "key": server.key,
                 "namespace": server.namespace,
+                # dashboard 直接展示每个 MCP 的实现语言，方便排查时快速判断运行时生态。
+                "language": server.display_language,
+                "description": server_description,
                 "status": status,
                 "statusLabel": status_label,
                 "toolCount": summary["catalog"]["tools"] if summary else 0,
                 "resourceCount": summary["catalog"]["resources"] if summary else 0,
                 "promptCount": summary["catalog"]["prompts"] if summary else 0,
+                "tools": summary["catalog"].get("toolList", []) if summary else [],
                 "probeOk": probe.get("ok"),
                 "probeDurationMs": probe.get("durationMs"),
                 "breakerState": breaker.get("state", "unknown"),
@@ -1584,9 +1602,107 @@ def _build_dashboard_payload(gateway: "SharedMcpGateway") -> dict[str, Any]:
             "dead": dead_count,
         },
         "servers": server_rows,
+        "agentConfigs": _load_agent_config_payload(gateway.registry),
         "recentClients": recent_clients,
         "recentLogs": recent_logs,
     }
+
+
+def _load_agent_config_payload(registry: Registry) -> list[dict[str, Any]]:
+    """读取构建产物里的 agent 接入配置，供 dashboard 做一键复制。
+
+    这里优先复用仓库里已经生成好的 `generated/*` 文件：
+    - 避免在容器内重新渲染时误用 `/app/...` 这类容器路径；
+    - 保持和用户本机 `scripts/render_client_configs.py` 生成结果一致。
+    """
+
+    generated_dir = project_root / "generated"
+    targets = [
+        ("codex", "Codex", "codex-mcp.toml", "toml"),
+        ("opencode", "OpenCode", "opencode-mcp.jsonc", "jsonc"),
+        ("openclaw", "OpenClaw", "openclaw-mcp.json", "json"),
+    ]
+
+    payload: list[dict[str, Any]] = []
+    for key, title, filename, content_type in targets:
+        source_file = generated_dir / filename
+        if not source_file.exists():
+            continue
+
+        target_path = registry.clients.get(key, {}).get("config_path")
+        raw_content = source_file.read_text(encoding="utf-8")
+        display_content = _sanitize_agent_config_display(raw_content)
+        prompt_content = _build_agent_prompt_content(
+            title=title,
+            target_path=target_path,
+            config_content=raw_content,
+        )
+        payload.append(
+            {
+                "key": key,
+                "title": title,
+                "fileName": filename,
+                "contentType": content_type,
+                "sourceFile": str(source_file),
+                "sourceFileDisplay": _sanitize_agent_config_display(str(source_file)),
+                "targetPath": target_path,
+                "targetPathDisplay": _sanitize_agent_config_display(target_path) if target_path else None,
+                "content": raw_content,
+                "displayContent": display_content,
+                "promptContent": prompt_content,
+                "displayPromptContent": _sanitize_agent_config_display(prompt_content),
+                "displaySanitized": display_content != raw_content,
+            }
+        )
+    return payload
+
+
+def _build_agent_prompt_content(title: str, target_path: str | None, config_content: str) -> str:
+    """生成“提示词接入版本”，方便直接丢给 agent 执行。"""
+
+    target_hint = (
+        f"目标配置文件：`{target_path}`"
+        if target_path
+        else "目标配置文件：请按当前环境定位对应 agent 的 MCP 配置文件。"
+    )
+    return "\n".join(
+        [
+            f"请帮我把 shared-gateway 接入到 {title}。",
+            "",
+            "要求：",
+            "1. 仅新增或合并 shared-gateway 配置，不要覆盖其他已有 MCP 配置；",
+            "2. 如果目标配置文件不存在，则创建它；",
+            "3. 如果已有同名 shared-gateway，则按下面内容更新；",
+            "4. 完成后请输出最终落地文件路径，并确认 shared-gateway 已启用。",
+            "",
+            target_hint,
+            "",
+            "请使用下面这段配置：",
+            "```",
+            config_content.rstrip(),
+            "```",
+        ]
+    )
+
+
+def _sanitize_agent_config_display(text: str | None) -> str | None:
+    """把 dashboard 里展示的 agent 配置做脱敏，避免暴露本机真实路径。"""
+
+    if text in (None, ""):
+        return text
+
+    display_text = str(text)
+    replacements = [
+        # 先替换项目根路径，避免 `/Users/<name>/<workspace>/shared-mcp-gateway` 暴露真实用户名。
+        (r"/Users/[^/\s]+/[^/\s]+/shared-mcp-gateway", "/absolute/path/to/shared-mcp-gateway"),
+        # 通用 home 路径脱敏。
+        (r"/Users/[^/\s]+", "/Users/your-name"),
+        # Python 解释器统一成案例写法，避免展示 Homebrew/虚拟环境真实安装路径。
+        (r'(?<=["\s])/(?:opt/homebrew|usr/local|usr)/[^"\s]*?/python(?:\d+(?:\.\d+)*)?(?=[\s"])', "python3"),
+    ]
+    for pattern, replacement in replacements:
+        display_text = re.sub(pattern, replacement, display_text)
+    return display_text
 
 
 def _dashboard_dist_dir() -> Path:

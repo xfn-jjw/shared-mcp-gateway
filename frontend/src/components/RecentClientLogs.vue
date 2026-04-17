@@ -11,6 +11,10 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  servers: {
+    type: Array,
+    required: true,
+  },
 })
 
 const selectedClientIp = ref('all')
@@ -46,6 +50,16 @@ const totalErrors = computed(
   () => props.recentClients.reduce((sum, client) => sum + (client.errorCount || 0), 0),
 )
 
+const serverDisplayMap = computed(() => {
+  const entries = props.servers.map((server) => [
+    server.key,
+    server.namespace && server.namespace !== server.key
+      ? `${server.key} (${server.namespace})`
+      : server.key,
+  ])
+  return new Map(entries)
+})
+
 function selectClient(clientIp) {
   selectedClientIp.value = clientIp
 }
@@ -58,6 +72,21 @@ function statusClass(status) {
 
 function eventLabel(log) {
   return log.eventType === 'tool_call' ? 'Tool 调用' : 'HTTP 请求'
+}
+
+function formatMcpName(value) {
+  if (!value) return '-'
+  return serverDisplayMap.value.get(value) || value
+}
+
+function mcpLabel(log) {
+  if (log.downstream) {
+    return formatMcpName(log.downstream)
+  }
+  if (log.tool && String(log.tool).includes('.')) {
+    return formatMcpName(String(log.tool).split('.')[0])
+  }
+  return '-'
 }
 
 function targetLabel(log) {
@@ -112,6 +141,9 @@ function displayTime(value) {
             <span>错误 {{ client.errorCount }}</span>
           </div>
           <div class="client-extra">最后活跃：{{ displayTime(client.lastSeenAt) }}</div>
+          <div v-if="client.lastDownstream" class="client-extra muted">
+            最近 MCP：{{ formatMcpName(client.lastDownstream) }}
+          </div>
           <div v-if="client.lastTool || client.lastPath" class="client-extra muted">
             最近目标：{{ client.lastTool || client.lastPath }}
           </div>
@@ -140,8 +172,8 @@ function displayTime(value) {
                 <th>IP</th>
                 <th>Caller</th>
                 <th>类型</th>
+                <th>MCP</th>
                 <th>目标</th>
-                <th>下游</th>
                 <th>状态</th>
                 <th>耗时</th>
                 <th>错误</th>
@@ -153,8 +185,8 @@ function displayTime(value) {
                 <td data-label="IP" class="mono">{{ log.clientIp || '-' }}</td>
                 <td data-label="Caller">{{ log.caller || '-' }}</td>
                 <td data-label="类型">{{ eventLabel(log) }}</td>
+                <td data-label="MCP" class="mono">{{ mcpLabel(log) }}</td>
                 <td data-label="目标" class="mono">{{ targetLabel(log) }}</td>
-                <td data-label="下游" class="mono">{{ log.downstream || '-' }}</td>
                 <td data-label="状态">
                   <span class="status-pill" :class="statusClass(log.status)">{{ log.status ?? '-' }}</span>
                 </td>

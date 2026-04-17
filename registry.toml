@@ -38,6 +38,8 @@ config_path = "~/.openclaw/workspace/mcp.json"
 key = "mempalace"
 enabled = true
 namespace = "mempalace"
+language = "Python"
+description = "共享记忆与知识图谱能力，用于写入/检索长期记忆、关系事实、语义搜索与时间线查询。"
 command = "/opt/mempalace/.venv/bin/python"
 args = ["-m", "mempalace.mcp_server"]
 env = { PYTHONPATH = "/opt/mempalace" }
@@ -47,6 +49,8 @@ env = { PYTHONPATH = "/opt/mempalace" }
 key = "mysql-db"
 enabled = true
 namespace = "mysql_db"
+language = "Python"
+description = "MySQL 只读查询能力，用于查看表结构、索引、数据记录，以及执行安全的 SELECT / SHOW / EXPLAIN。"
 command = "/bin/bash"
 args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 
@@ -55,6 +59,8 @@ args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 key = "obsidian-kb"
 enabled = true
 namespace = "obsidian_kb"
+language = "Python"
+description = "Obsidian 知识库读写能力，用于搜索、读取、更新笔记，以及查看反向链接。"
 command = "/bin/bash"
 args = ["-lc", "cd /opt/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/opt/openclaw-workspace ./.venv/bin/python server.py"]
 
@@ -63,6 +69,8 @@ args = ["-lc", "cd /opt/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/opt/o
 key = "tencent-cls"
 enabled = true
 namespace = "tencent_cls"
+language = "Python"
+description = "腾讯云 CLS 日志检索能力，用于登录控制台并按 traceId 拉取完整日志，辅助排障。"
 command = "/bin/bash"
 args = ["-lc", "cd /opt/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
 
@@ -72,6 +80,8 @@ args = ["-lc", "cd /opt/mcps/tencent-cls-connector && ./.venv/bin/python server.
 key = "openspace"
 enabled = true
 namespace = "openspace"
+language = "Python"
+description = "通用任务执行与技能编排能力，用于搜索技能、执行多步任务、演化并上传技能。"
 command = "/opt/OpenSpace/.venv/bin/openspace-mcp"
 args = []
 env = { OPENSPACE_HOST_SKILL_DIRS = "/opt/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/opt/OpenSpace" }

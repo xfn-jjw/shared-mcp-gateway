@@ -42,6 +42,10 @@ key = "mempalace"
 enabled = true
 # 聚合后的命名空间前缀。
 namespace = "mempalace"
+# 可选：dashboard 展示的实现语言；不填时会按启动命令启发式推断。
+language = "Python"
+# 可选：dashboard 展示的 MCP 用途说明。
+description = "共享记忆与知识图谱能力。"
 # 启动该 MCP Server 的命令。
 command = "/absolute/path/to/mempalace/.venv/bin/python"
 # 启动参数。
@@ -59,6 +63,8 @@ env = { PYTHONPATH = "/absolute/path/to/mempalace" }
 key = "mysql-db"
 enabled = true
 namespace = "mysql_db"
+language = "Python"
+description = "MySQL 只读查询能力。"
 command = "/bin/bash"
 args = ["-lc", "cd /absolute/path/to/mcps/mysql-connector && ./.venv/bin/python server.py"]
 
@@ -67,6 +73,8 @@ args = ["-lc", "cd /absolute/path/to/mcps/mysql-connector && ./.venv/bin/python 
 key = "obsidian-kb"
 enabled = true
 namespace = "obsidian_kb"
+language = "Python"
+description = "Obsidian 知识库读写能力。"
 command = "/bin/bash"
 args = ["-lc", "cd /absolute/path/to/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/absolute/path/to/obsidian-vault ./.venv/bin/python server.py"]
 
@@ -75,6 +83,8 @@ args = ["-lc", "cd /absolute/path/to/mcps/obsidian-kb-connector && OBSIDIAN_VAUL
 key = "tencent-cls"
 enabled = true
 namespace = "tencent_cls"
+language = "Python"
+description = "腾讯云 CLS 日志检索能力。"
 command = "/bin/bash"
 args = ["-lc", "cd /absolute/path/to/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
 
@@ -84,6 +94,8 @@ args = ["-lc", "cd /absolute/path/to/mcps/tencent-cls-connector && ./.venv/bin/p
 key = "openspace"
 enabled = true
 namespace = "openspace"
+language = "Python"
+description = "通用任务执行与技能编排能力。"
 command = "/absolute/path/to/OpenSpace/.venv/bin/openspace-mcp"
 args = []
 env = { OPENSPACE_HOST_SKILL_DIRS = "/absolute/path/to/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/absolute/path/to/OpenSpace" }

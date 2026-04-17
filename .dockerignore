@@ -1,7 +1,6 @@
 .git
 __pycache__
 *.pyc
-generated
 launchd
 frontend/node_modules
 frontend/dist

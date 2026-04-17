@@ -141,9 +141,14 @@ description = "Shared MCP gateway for local development."
 key = "mysql-db"
 enabled = true
 namespace = "mysql_db"
+language = "Python"
+description = "Read-only MySQL access"
 command = "/bin/bash"
 args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 ```
+
+Optional `language` can be provided for dashboard display. If omitted, the gateway will try to infer it from the launch command.
+Optional `description` can be provided so the dashboard can explain what each MCP is for.
 
 Optional `env` can be provided per downstream server.
 

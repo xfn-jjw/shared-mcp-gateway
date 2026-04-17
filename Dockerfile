@@ -43,6 +43,10 @@ RUN python -m pip install --upgrade pip && \
 
 COPY shared_mcp_gateway /app/shared_mcp_gateway
 COPY scripts /app/scripts
+RUN mkdir -p /app/generated
+COPY generated/codex-mcp.toml /app/generated/codex-mcp.toml
+COPY generated/opencode-mcp.jsonc /app/generated/opencode-mcp.jsonc
+COPY generated/openclaw-mcp.json /app/generated/openclaw-mcp.json
 COPY registry.compose.toml /app/registry.compose.toml
 COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 

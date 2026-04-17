@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import SummaryCards from './components/SummaryCards.vue'
 import ServerTable from './components/ServerTable.vue'
 import RecentClientLogs from './components/RecentClientLogs.vue'
+import AgentAccessModal from './components/AgentAccessModal.vue'
 import { formatGatewayTime } from './utils/time'
 
 const dashboardData = ref({
@@ -10,6 +11,7 @@ const dashboardData = ref({
   indexes: {},
   summary: { total: 0, alive: 0, dead: 0 },
   servers: [],
+  agentConfigs: [],
   recentClients: [],
   recentLogs: [],
 })
@@ -19,6 +21,7 @@ const refreshMode = ref('idle')
 const errorMessage = ref('')
 const refreshTimer = ref(null)
 const lastRefreshAt = ref('')
+const agentAccessVisible = ref(false)
 // 只允许最后一次请求回写页面状态，避免自动轮询与手动刷新并发时出现旧数据覆盖。
 let activeRequestId = 0
 let activeAbortController = null
@@ -129,6 +132,14 @@ function manualRefresh() {
   fetchDashboardData({ silent: false })
 }
 
+function openAgentAccess() {
+  agentAccessVisible.value = true
+}
+
+function closeAgentAccess() {
+  agentAccessVisible.value = false
+}
+
 onMounted(() => {
   fetchDashboardData({ silent: false })
   refreshTimer.value = window.setInterval(() => {
@@ -174,15 +185,24 @@ onUnmounted(() => {
           <p>查看当前接入的 MCP 数量、存活状态、接入 IP 与对应调用日志。</p>
         </div>
         <div class="action-block">
-          <button
-            class="refresh-button"
-            :class="{ refreshing }"
-            :disabled="refreshing"
-            type="button"
-            @click="manualRefresh"
-          >
-            {{ refreshing ? '刷新中...' : '立即刷新' }}
-          </button>
+          <div class="action-buttons">
+            <button
+              class="secondary-button"
+              type="button"
+              @click="openAgentAccess"
+            >
+              Agent 一键接入
+            </button>
+            <button
+              class="refresh-button"
+              :class="{ refreshing }"
+              :disabled="refreshing"
+              type="button"
+              @click="manualRefresh"
+            >
+              {{ refreshing ? '刷新中...' : '立即刷新' }}
+            </button>
+          </div>
           <a href="/healthz" target="_blank" rel="noreferrer">查看原始 /healthz JSON</a>
         </div>
       </header>
@@ -202,10 +222,17 @@ onUnmounted(() => {
         v-if="!loading"
         :recent-clients="dashboardData.recentClients || []"
         :recent-logs="dashboardData.recentLogs || []"
+        :servers="dashboardData.servers || []"
       />
 
       <footer class="footer">页面每 10 秒静默刷新一次；只有手动刷新才会显示整页状态。</footer>
     </div>
+
+    <AgentAccessModal
+      :visible="agentAccessVisible"
+      :agent-configs="dashboardData.agentConfigs || []"
+      @close="closeAgentAccess"
+    />
   </div>
 </template>
 
@@ -340,13 +367,21 @@ body {
   gap: 10px;
 }
 
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .action-block a {
   color: var(--blue);
   text-decoration: none;
   font-size: 14px;
 }
 
-.refresh-button {
+.refresh-button,
+.secondary-button {
   border: 1px solid rgba(96, 165, 250, 0.35);
   background: rgba(96, 165, 250, 0.16);
   color: #dbeafe;
