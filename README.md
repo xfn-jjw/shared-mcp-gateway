@@ -250,13 +250,13 @@ args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 - `args`：启动参数
 - `env`：可选，给该服务单独注入环境变量
 
-### 4. 本地特例说明
+### 4. 本地特例说明（可选）
 
 ```toml
-[local_exceptions.openclaw]
-keep_local = ["openspace"]
-reason = "OpenSpace 强依赖宿主上下文，保留本地直连。"
-endpoint = "http://127.0.0.1:8081/mcp"
+[local_exceptions.some-client]
+keep_local = ["host-only-mcp"]
+reason = "示例：某个能力必须跟随单一宿主独立运行。"
+endpoint = "http://127.0.0.1:8090/mcp"
 ```
 
 用于记录哪些能力不走共享网关，而是继续保留本地直连。
@@ -307,8 +307,16 @@ namespace = "mysql_db"
 command = "/bin/bash"
 args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 
+[[servers]]
+key = "openspace"
+enabled = true
+namespace = "openspace"
+command = "/opt/OpenSpace/.venv/bin/openspace-mcp"
+args = []
+env = { OPENSPACE_HOST_SKILL_DIRS = "/opt/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/opt/OpenSpace" }
+
 [local_exceptions.shared_gateway]
-managed = ["mempalace", "mysql_db"]
+managed = ["mempalace", "mysql_db", "openspace"]
 reason = "共享能力统一由 shared-gateway 纳管。"
 ```
 
@@ -329,9 +337,11 @@ services:
     environment:
       OBSIDIAN_VAULT_PATH: /workspace/openclaw-workspace
       PYTHONPATH: /workspace/mempalace
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     volumes:
       - /opt/mcps:/workspace/mcps:ro
       - /opt/mempalace:/workspace/mempalace:ro
+      - /opt/OpenSpace:/workspace/OpenSpace:rw
       - /opt/openclaw-workspace:/workspace/openclaw-workspace:rw
       - /opt/mempalace-data:/root/.mempalace:rw
 ```
@@ -340,6 +350,13 @@ services:
 
 - 把多个 MCP 运行时依赖挂进同一个容器上下文。
 - 通过只读挂载保证下游代码目录稳定。
+
+如果希望 Docker 版 `shared-gateway` 也托管 `OpenSpace`，还需要：
+
+- 在镜像里安装 OpenSpace 的 Python 依赖
+- 把 OpenSpace 源码挂载到 `/workspace/OpenSpace`
+- 通过环境变量把 LLM / OpenSpace API 凭证透传进容器
+- 在 `registry.compose.toml` 里把 `openspace` 加入 `[[servers]]`
 - 统一使用容器里的 `registry.compose.toml`。
 
 ## 配置模板文件

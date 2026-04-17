@@ -1,4 +1,4 @@
 [mcp_servers.shared-gateway]
 command = "/bin/bash"
-args = ["-lc", "/Users/jervis.jiang/jervis.jiang/OpenSpace/.venv/bin/python /Users/jervis.jiang/jervis.jiang/shared-mcp-gateway/shared_mcp_gateway/stdio_bridge.py --url http://127.0.0.1:8787/mcp --caller codex"]
+args = ["-lc", "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/jervis.jiang/jervis.jiang/shared-mcp-gateway/shared_mcp_gateway/stdio_bridge.py --url http://127.0.0.1:8787/mcp --caller codex"]
 enabled = true

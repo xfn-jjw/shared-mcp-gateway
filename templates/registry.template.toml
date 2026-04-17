@@ -78,16 +78,20 @@ namespace = "tencent_cls"
 command = "/bin/bash"
 args = ["-lc", "cd /absolute/path/to/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
 
+[[servers]]
+# OpenSpace 示例：如果希望所有客户端都通过 shared-gateway 访问它，
+# 直接把 openspace-mcp 作为一个 stdio 下游接入即可。
+key = "openspace"
+enabled = true
+namespace = "openspace"
+command = "/absolute/path/to/OpenSpace/.venv/bin/openspace-mcp"
+args = []
+env = { OPENSPACE_HOST_SKILL_DIRS = "/absolute/path/to/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/absolute/path/to/OpenSpace" }
+
 [local_exceptions.shared_gateway]
 # 记录当前由 shared-gateway 统一托管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
 reason = "共享型 MCP 统一纳管，减少多客户端重复配置。"
-
-[local_exceptions.openclaw]
-# 记录必须保留本地直连的能力。
-keep_local = ["openspace"]
-reason = "OpenSpace 强依赖宿主上下文与工作区能力，保留本地直连。"
-endpoint = "http://127.0.0.1:8081/mcp"
 
 # local_exceptions 的用途主要是“说明拓扑决策”，
 # 不是网关转发时的硬编码白名单；

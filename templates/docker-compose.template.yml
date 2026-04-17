@@ -15,13 +15,19 @@ services:
       # 根据你的下游 MCP 实际依赖补充环境变量。
       OBSIDIAN_VAULT_PATH: /workspace/openclaw-workspace
       PYTHONPATH: /workspace/mempalace
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENSPACE_API_KEY: ${OPENSPACE_API_KEY:-}
     volumes:
       # 下面这些路径请替换成你自己的绝对路径。
       # 原则：
-      # - 代码目录优先只读挂载，降低误改风险；
+      # - 大多数代码目录优先只读挂载，降低误改风险；
       # - 运行数据目录单独 rw 挂载，便于持久化。
       - /absolute/path/to/mcps:/workspace/mcps:ro
       - /absolute/path/to/mempalace:/workspace/mempalace:ro
+      # OpenSpace 会在源码目录下写 logs / .openspace，因此建议 rw。
+      - /absolute/path/to/OpenSpace:/workspace/OpenSpace:rw
       - /absolute/path/to/openclaw-workspace:/workspace/openclaw-workspace:rw
       - /absolute/path/to/mempalace-data:/root/.mempalace:rw
     healthcheck:

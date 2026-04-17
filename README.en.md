@@ -147,13 +147,13 @@ args = ["-lc", "cd /opt/mcps/mysql-connector && ./.venv/bin/python server.py"]
 
 Optional `env` can be provided per downstream server.
 
-### 4. Local exceptions
+### 4. Local exceptions (optional)
 
 ```toml
-[local_exceptions.openclaw]
-keep_local = ["openspace"]
-reason = "OpenSpace depends heavily on local host context."
-endpoint = "http://127.0.0.1:8081/mcp"
+[local_exceptions.some-client]
+keep_local = ["host-only-mcp"]
+reason = "Example: one MCP must stay bound to a single host."
+endpoint = "http://127.0.0.1:8090/mcp"
 ```
 
 ### 5. Client config path metadata (optional)
@@ -174,6 +174,13 @@ Use `registry.toml` for a direct host setup.
 ### Containerized example
 
 Use `registry.compose.toml` when the gateway runs inside Docker / Compose and downstream paths are mounted inside the container.
+
+If you want the Dockerized gateway to host `OpenSpace` as well, make sure you:
+
+- install OpenSpace Python dependencies in the image
+- mount the OpenSpace source tree into `/workspace/OpenSpace`
+- pass LLM / OpenSpace API credentials into the container environment
+- add `openspace` to `[[servers]]` in `registry.compose.toml`
 
 ## Configuration template files
 

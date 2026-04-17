@@ -66,13 +66,17 @@ namespace = "tencent_cls"
 command = "/bin/bash"
 args = ["-lc", "cd /opt/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
 
+[[servers]]
+# openspace：通用任务委派 / skill 搜索能力。
+# 宿主机直跑时，推荐直接以 stdio 方式纳入 shared-gateway。
+key = "openspace"
+enabled = true
+namespace = "openspace"
+command = "/opt/OpenSpace/.venv/bin/openspace-mcp"
+args = []
+env = { OPENSPACE_HOST_SKILL_DIRS = "/opt/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/opt/OpenSpace" }
+
 [local_exceptions.shared_gateway]
 # 当前由 shared-gateway 统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
 reason = "共享型 MCP 适合统一收口、统一日志与统一自检。"
-
-[local_exceptions.openclaw]
-# 仍保留本地直连的宿主特例。
-keep_local = ["openspace"]
-reason = "OpenSpace 强依赖 OpenClaw 宿主上下文与本地工作区能力，保留本地直连。"
-endpoint = "http://127.0.0.1:8081/mcp"

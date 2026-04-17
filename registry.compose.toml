@@ -51,13 +51,18 @@ namespace = "tencent_cls"
 command = "/usr/local/bin/python"
 args = ["/workspace/mcps/tencent-cls-connector/server.py"]
 
+[[servers]]
+# openspace：容器内通过挂载源码 + python -m 方式运行。
+# 为了适配 headless 容器，默认关闭 gui / web，仅保留 shell、mcp、system。
+# 当前 compose 只挂载 OpenClaw 工作区技能目录，避免引用容器内不存在的路径。
+key = "openspace"
+enabled = true
+namespace = "openspace"
+command = "/usr/local/bin/python"
+args = ["-m", "openspace.mcp_server"]
+env = { PYTHONPATH = "/workspace/OpenSpace", OPENSPACE_HOST_SKILL_DIRS = "/workspace/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/workspace/OpenSpace", OPENSPACE_BACKEND_SCOPE = "shell,mcp,system" }
+
 [local_exceptions.shared_gateway]
 # 当前由 shared-gateway 统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
 reason = "共享型 MCP 适合统一收口、统一日志与统一自检。"
-
-[local_exceptions.openclaw]
-# 仍保留本地直连的宿主特例。
-keep_local = ["openspace"]
-reason = "OpenSpace 强依赖 OpenClaw 宿主上下文与本地工作区能力，保留本地直连。"
-endpoint = "http://127.0.0.1:8081/mcp"

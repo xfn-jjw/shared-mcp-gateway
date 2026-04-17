@@ -25,22 +25,23 @@
 - 同一套健康检查与心跳探活
 - 同一套最小熔断与失败隔离能力
 
-## 2. 必须保留本地特例的 MCP
+## 2. 宿主机直跑时也建议进 shared-gateway 的 MCP
 
-| MCP | 保持本地的客户端 | 原因 |
+| MCP | namespace | 说明 |
 | --- | --- | --- |
-| OpenSpace | OpenClaw | 强依赖宿主工作区、宿主技能目录和本地上下文，生命周期也独立于共享网关 |
+| OpenSpace | `openspace` | 虽然依赖宿主工作区与技能目录，但它本身支持 stdio MCP，可以通过 env 显式注入宿主上下文后纳入 shared-gateway |
 
-当前 OpenSpace 仍由本地脚本启动：
-- 脚本：`/path/to/OpenSpace/start-openspace-mcp.sh`
-- 端点：`http://127.0.0.1:8081/mcp`
+宿主机直跑时，OpenSpace 推荐这样接入：
 
-之所以不放进共享网关，核心不是“它不能被代理”，而是：
+- 命令：`/path/to/OpenSpace/.venv/bin/openspace-mcp`
+- 环境变量：
+  - `OPENSPACE_HOST_SKILL_DIRS=/path/to/openclaw-workspace/skills`
+  - `OPENSPACE_WORKSPACE=/path/to/OpenSpace`
 
-- 它和宿主工作区上下文绑定更深
-- 它的生命周期与单一宿主更一致
-- 它的问题排查通常依赖本地状态，而不是共享运行面
-- 一旦强行共享化，收益通常小于复杂度
+这样做之后，Codex / OpenCode / OpenClaw 都只需要连接 `shared-gateway`，不必再各自维护一份 OpenSpace 本地直连配置。
+
+> 例外：如果网关本身运行在 Docker 容器里，需要额外把 OpenSpace 源码、宿主技能目录与 LLM 凭证一起注入容器；
+> 只要这些运行条件满足，容器版也可以直接纳管 OpenSpace。
 
 ## 3. 判断规则
 
@@ -50,6 +51,7 @@
 - 适合统一观测、统一日志、统一熔断
 - 下游异常不应拖累客户端整体体验
 - 通过 namespace 聚合后不会引起明显歧义
+- 即使依赖宿主上下文，也能通过稳定 env / 路径注入方式复现运行条件
 
 ### 应该保留本地特例
 - 强依赖某个宿主工作区/会话/技能目录
@@ -60,10 +62,10 @@
 
 ## 4. 当前落地结论
 
-- `shared-gateway`：只收口共享型 MCP
-- `OpenSpace`：继续保留为本地特例
-- 不追求“所有 MCP 全统一”
-- 统一的是**共享能力层**，不是所有宿主能力
+- 宿主机直跑场景下，`shared-gateway` 收口共享型 MCP，也收口可通过稳定 env 注入的宿主能力（例如 `OpenSpace`）
+- 默认客户端配置优先只保留 `shared-gateway`
+- 容器版部署如果缺少 OpenSpace 运行时，可暂时保留例外
+- 统一的是**可稳定托管的能力层**
 
 ## 5. 新增 MCP 时的归位步骤
 
@@ -79,4 +81,4 @@
 ## 6. 一句话原则
 
 能抽成“共享能力层”的，就放进 `shared-gateway`；
-本质依赖“宿主上下文”的，就保留本地特例。
+如果只是“依赖宿主上下文，但可以显式注入”，也优先尝试纳入 `shared-gateway`。

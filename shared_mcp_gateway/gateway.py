@@ -12,7 +12,8 @@ import sys
 import time
 import traceback
 import uuid
-from collections import Counter
+from datetime import datetime, timedelta, timezone
+from collections import Counter, deque
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,9 +30,10 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.shared.exceptions import McpError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.responses import JSONResponse, RedirectResponse
+from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.staticfiles import StaticFiles
 
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
@@ -48,6 +50,9 @@ HEARTBEAT_INTERVAL_SECONDS = 30 * 60
 FAILURE_ALERT_THRESHOLD = 3
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3
 CIRCUIT_BREAKER_OPEN_SECONDS = 60
+RECENT_ACTIVITY_LIMIT = 300
+DASHBOARD_ACTIVITY_PATHS = {"/dashboard", "/dashboard/", "/dashboard/data"}
+DASHBOARD_DISPLAY_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 ANSI_RESET = "\033[0m"
 ANSI_GREEN = "\033[32m"
 ANSI_YELLOW = "\033[33m"
@@ -93,6 +98,48 @@ class RequestContext:
     user_agent: str = "-"
     method: str = "-"
     path: str = "-"
+
+
+@dataclass(slots=True)
+class GatewayActivityEvent:
+    """仪表盘使用的最近访问事件。
+
+    这里只保留轻量字段并放入内存环形缓冲区，目的是：
+    - 页面上快速看到最近是谁在接入 gateway；
+    - 支持按 IP 回看最近一次 HTTP / tool 调用；
+    - 不把原始入参和大段结果落盘，避免膨胀。
+    """
+
+    timestamp: str
+    event_type: str
+    request_id: str
+    client_ip: str
+    caller: str
+    method: str | None = None
+    path: str | None = None
+    tool: str | None = None
+    downstream: str | None = None
+    status: str | int | None = None
+    duration_ms: float | None = None
+    error_summary: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """输出给 dashboard 的稳定 JSON 结构。"""
+
+        return {
+            "timestamp": self.timestamp,
+            "eventType": self.event_type,
+            "requestId": self.request_id,
+            "clientIp": self.client_ip,
+            "caller": self.caller,
+            "method": self.method,
+            "path": self.path,
+            "tool": self.tool,
+            "downstream": self.downstream,
+            "status": self.status,
+            "durationMs": self.duration_ms,
+            "errorSummary": self.error_summary,
+        }
 
 
 @dataclass(slots=True)
@@ -334,6 +381,8 @@ class SharedMcpGateway:
         self.started_at = time.time()
         self.last_heartbeat_at: str | None = None
         self.last_probe_snapshot: dict[str, Any] = {}
+        # 最近活动只保留固定条数，避免仪表盘功能把 gateway 进程内存拖大。
+        self.recent_activity: deque[GatewayActivityEvent] = deque(maxlen=RECENT_ACTIVITY_LIMIT)
         self._tool_index: dict[str, tuple[DownstreamConnection, str, types.Tool]] = {}
         self._resource_index: dict[str, tuple[DownstreamConnection, str, types.Resource]] = {}
         self._template_index: dict[str, tuple[DownstreamConnection, str, types.ResourceTemplate]] = {}
@@ -687,6 +736,46 @@ class SharedMcpGateway:
             traceback_summary=traceback_summary,
         )
 
+    def record_activity(
+        self,
+        *,
+        event_type: str,
+        request_id: str,
+        client_ip: str,
+        caller: str,
+        method: str | None = None,
+        path: str | None = None,
+        tool: str | None = None,
+        downstream: str | None = None,
+        status: str | int | None = None,
+        duration_ms: float | None = None,
+        error_summary: str | None = None,
+    ) -> None:
+        """写入最近活动环形缓冲区，供 dashboard 按 IP 回看调用轨迹。"""
+
+        self.recent_activity.appendleft(
+            GatewayActivityEvent(
+                timestamp=_now_string(),
+                event_type=event_type,
+                request_id=request_id or '-',
+                client_ip=client_ip or '-',
+                caller=caller or 'unknown',
+                method=method,
+                path=path,
+                tool=tool,
+                downstream=downstream,
+                status=status,
+                duration_ms=duration_ms,
+                error_summary=_truncate_text(error_summary, 300),
+            )
+        )
+
+    def recent_activity_snapshot(self) -> list[dict[str, Any]]:
+        """返回最近活动快照，避免 dashboard 直接接触内部对象。"""
+
+        return [event.to_dict() for event in self.recent_activity]
+
+
     def _namespaced_name(self, namespace: str, original_name: str) -> str:
         """把下游原始名字映射成网关侧全局唯一名字。"""
 
@@ -756,6 +845,18 @@ class SharedMcpGateway:
         )
         if not allowed:
             # 对 tool 调用返回 MCP 级错误结果，而不是直接抛异常，便于客户端统一消费。
+            self.record_activity(
+                event_type="tool_call",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                method=context.method,
+                path=context.path,
+                tool=public_name,
+                downstream=connection.config.key,
+                status="circuit_open",
+                error_summary=_circuit_open_message(connection, breaker),
+            )
             return _build_circuit_open_call_tool_result(connection, breaker)
 
         argument_summary = _summarize_arguments(arguments)
@@ -785,6 +886,19 @@ class SharedMcpGateway:
                 target=public_name,
                 exc=exc,
             )
+            self.record_activity(
+                event_type="tool_call",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                method=context.method,
+                path=context.path,
+                tool=public_name,
+                downstream=connection.config.key,
+                status="exception",
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                error_summary=_summarize_exception(exc),
+            )
             raise
 
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -800,6 +914,19 @@ class SharedMcpGateway:
                 error_code=error_details["errorCode"],
                 error_summary=error_details["errorSummary"],
                 traceback_summary=error_details["tracebackSummary"],
+            )
+            self.record_activity(
+                event_type="tool_call",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                method=context.method,
+                path=context.path,
+                tool=public_name,
+                downstream=connection.config.key,
+                status="error",
+                duration_ms=duration_ms,
+                error_summary=error_details["errorSummary"],
             )
             log_event(
                 LOGGER,
@@ -818,6 +945,18 @@ class SharedMcpGateway:
         else:
             self._mark_success(f"call_tool:{public_name}")
             self._record_transport_success(connection.config.key, source="call_tool")
+            self.record_activity(
+                event_type="tool_call",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                method=context.method,
+                path=context.path,
+                tool=public_name,
+                downstream=connection.config.key,
+                status="success",
+                duration_ms=duration_ms,
+            )
             log_event(
                 LOGGER,
                 logging.INFO,
@@ -1296,6 +1435,166 @@ async def _optional_request(server_key: str, method_name: str, func):
         raise
 
 
+def _build_recent_client_rows(recent_logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按客户端 IP 聚合最近调用，供 dashboard 左侧列表直接使用。"""
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for event in recent_logs:
+        client_ip = event.get("clientIp") or "-"
+        row = grouped.get(client_ip)
+        if row is None:
+            row = {
+                "clientIp": client_ip,
+                "caller": event.get("caller") or "unknown",
+                "lastSeenAt": event.get("timestamp"),
+                "eventCount": 0,
+                "toolCalls": 0,
+                "httpRequests": 0,
+                "errorCount": 0,
+                "lastPath": event.get("path"),
+                "lastTool": event.get("tool"),
+            }
+            grouped[client_ip] = row
+
+        row["eventCount"] += 1
+        if event.get("eventType") == "tool_call":
+            row["toolCalls"] += 1
+        if event.get("eventType") == "http_request":
+            row["httpRequests"] += 1
+        if event.get("status") in {"error", "exception", "circuit_open"}:
+            row["errorCount"] += 1
+        if not row.get("lastPath") and event.get("path"):
+            row["lastPath"] = event.get("path")
+        if not row.get("lastTool") and event.get("tool"):
+            row["lastTool"] = event.get("tool")
+
+    return sorted(grouped.values(), key=lambda item: (-(item["toolCalls"] + item["httpRequests"]), item["clientIp"]))
+
+
+def _format_dashboard_time(value: int | float | str | None) -> str | None:
+    """把 dashboard 暴露的时间统一转成带时区偏移的 ISO 字符串。
+
+    这样浏览器可以基于源时间的真实时区做二次展示，避免前后端都输出
+    “无时区字符串”时，被非东八区浏览器误当成本地时间解析。
+    """
+
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=DASHBOARD_DISPLAY_TIMEZONE).isoformat(timespec="seconds")
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    normalized = re.sub(
+        r"^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})([+-]\d{2})(\d{2})$",
+        r"\1T\2\3:\4",
+        text,
+    )
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return text
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=DASHBOARD_DISPLAY_TIMEZONE)
+    else:
+        parsed = parsed.astimezone(DASHBOARD_DISPLAY_TIMEZONE)
+    return parsed.isoformat(timespec="seconds")
+
+
+def _build_dashboard_payload(gateway: "SharedMcpGateway") -> dict[str, Any]:
+    """把 health 快照整理成状态页可直接消费的数据。"""
+
+    snapshot = gateway.health_snapshot()
+    connected_namespaces = set(snapshot["gateway"]["connectedServers"])
+    failed_servers = snapshot["gateway"]["failedServers"]
+    probe_snapshot = snapshot.get("lastProbeSnapshot", {})
+    circuit_breakers = snapshot.get("circuitBreakers", {})
+
+    server_rows: list[dict[str, Any]] = []
+    for server in gateway.registry.enabled_servers:
+        summary = snapshot["servers"].get(server.namespace)
+        probe = probe_snapshot.get(server.namespace, {})
+        breaker = circuit_breakers.get(server.key, {})
+
+        # 页面把“已建立连接”视为存活；未连上则归为死亡，便于快速观察整体状态。
+        is_alive = server.namespace in connected_namespaces
+        status = "alive" if is_alive else "dead"
+        status_label = "存活" if is_alive else "死亡"
+
+        error_summary = (
+            failed_servers.get(server.key)
+            or breaker.get("lastErrorSummary")
+            or breaker.get("lastTracebackSummary")
+            or ("连接正常" if is_alive else "尚未连接")
+        )
+
+        server_rows.append(
+            {
+                "key": server.key,
+                "namespace": server.namespace,
+                "status": status,
+                "statusLabel": status_label,
+                "toolCount": summary["catalog"]["tools"] if summary else 0,
+                "resourceCount": summary["catalog"]["resources"] if summary else 0,
+                "promptCount": summary["catalog"]["prompts"] if summary else 0,
+                "probeOk": probe.get("ok"),
+                "probeDurationMs": probe.get("durationMs"),
+                "breakerState": breaker.get("state", "unknown"),
+                "errorSummary": error_summary,
+            }
+        )
+
+    alive_count = sum(1 for row in server_rows if row["status"] == "alive")
+    dead_count = len(server_rows) - alive_count
+
+    # 仪表盘访问信息本身会持续轮询，这里只展示更接近“接入人”的真实调用：
+    # 1) tool_call 一定保留；
+    # 2) http_request 只保留非 dashboard/healthz 的入口请求。
+    recent_logs = [
+        {
+            **event,
+            "timestamp": _format_dashboard_time(event.get("timestamp")),
+        }
+        for event in gateway.recent_activity_snapshot()
+        if event.get("eventType") == "tool_call"
+        or (event.get("eventType") == "http_request" and event.get("path") not in DASHBOARD_ACTIVITY_PATHS | {"/healthz"})
+    ]
+    recent_clients = _build_recent_client_rows(recent_logs)
+    gateway_info = {
+        **snapshot["gateway"],
+        "lastHeartbeatAt": _format_dashboard_time(snapshot["gateway"].get("lastHeartbeatAt")),
+    }
+
+    return {
+        "generatedAt": _format_dashboard_time(time.time()),
+        "gateway": gateway_info,
+        "indexes": snapshot["indexes"],
+        "metrics": snapshot["metrics"],
+        "summary": {
+            "total": len(server_rows),
+            "alive": alive_count,
+            "dead": dead_count,
+        },
+        "servers": server_rows,
+        "recentClients": recent_clients,
+        "recentLogs": recent_logs,
+    }
+
+
+def _dashboard_dist_dir() -> Path:
+    """返回 Vue 仪表盘构建产物目录。"""
+
+    return project_root / "frontend" / "dist"
+
+
 async def _safe_aclose(stack: AsyncExitStack, label: str) -> None:
     """安全关闭异步资源；清理失败只记 debug 日志，不反向覆盖主错误。"""
 
@@ -1674,9 +1973,6 @@ class RequestLoggingMiddleware:
             return
 
         request = Request(scope, receive=receive)
-        if request.url.path == "/healthz":
-            await self.app(scope, receive, send)
-            return
 
         context = RequestContext(
             caller=_detect_caller(request),
@@ -1705,6 +2001,18 @@ class RequestLoggingMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         except Exception as exc:
+            duration_ms = round((time.perf_counter() - started) * 1000, 1)
+            self.gateway.record_activity(
+                event_type="http_request",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                method=context.method,
+                path=context.path,
+                status="error",
+                duration_ms=duration_ms,
+                error_summary=_summarize_exception(exc),
+            )
             log_event(
                 LOGGER,
                 logging.ERROR,
@@ -1715,13 +2023,24 @@ class RequestLoggingMiddleware:
                 path=context.path,
                 client_ip=context.client_ip,
                 user_agent=context.user_agent,
-                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                duration_ms=duration_ms,
                 error_code=_extract_error_code(exc),
                 error_summary=_summarize_exception(exc),
                 traceback_summary=_traceback_summary_from_exception(exc),
             )
             raise
         else:
+            duration_ms = round((time.perf_counter() - started) * 1000, 1)
+            self.gateway.record_activity(
+                event_type="http_request",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                method=context.method,
+                path=context.path,
+                status=status_code,
+                duration_ms=duration_ms,
+            )
             log_event(
                 LOGGER,
                 logging.INFO,
@@ -1733,7 +2052,7 @@ class RequestLoggingMiddleware:
                 status=status_code,
                 client_ip=context.client_ip,
                 user_agent=context.user_agent,
-                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                duration_ms=duration_ms,
             )
         finally:
             REQUEST_CONTEXT.reset(token)
@@ -1793,6 +2112,18 @@ async def create_app(registry: Registry) -> Starlette:
     async def healthz(_request):
         return JSONResponse(gateway.health_snapshot())
 
+    async def dashboard_data(_request):
+        """给状态页输出整理后的 MCP 概览数据。"""
+
+        return JSONResponse(_build_dashboard_payload(gateway))
+
+    async def dashboard_root(_request):
+        """统一把根路径跳到 Vue 仪表盘入口。"""
+
+        return RedirectResponse(url="/dashboard/", status_code=307)
+
+    dashboard_static = StaticFiles(directory=str(_dashboard_dist_dir()), html=True, check_dir=False)
+
     @asynccontextmanager
     async def lifespan(_app: Starlette):
         """启动网关与 session manager，并托管后台 heartbeat 任务。"""
@@ -1808,8 +2139,11 @@ async def create_app(registry: Registry) -> Starlette:
 
     app = Starlette(
         routes=[
-            Route(registry.listen.path, endpoint=mcp_app),
+            Route("/", endpoint=dashboard_root, methods=["GET"]),
+            Route("/dashboard/data", endpoint=dashboard_data, methods=["GET"]),
             Route("/healthz", endpoint=healthz, methods=["GET"]),
+            Route(registry.listen.path, endpoint=mcp_app),
+            Mount("/dashboard", app=dashboard_static, name="dashboard"),
         ],
         lifespan=lifespan,
     )

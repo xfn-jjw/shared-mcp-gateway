@@ -56,17 +56,22 @@ namespace = "tencent_cls"
 command = "/usr/local/bin/python"
 args = ["/workspace/mcps/tencent-cls-connector/server.py"]
 
+[[servers]]
+# OpenSpace 容器内示例。
+# 推荐通过挂载 OpenSpace 源码目录，再用 python -m openspace.mcp_server 启动。
+# 如果容器是 headless 环境，建议先把 backend scope 收敛到 shell / mcp / system。
+key = "openspace"
+enabled = true
+namespace = "openspace"
+command = "/usr/local/bin/python"
+args = ["-m", "openspace.mcp_server"]
+env = { PYTHONPATH = "/workspace/OpenSpace", OPENSPACE_HOST_SKILL_DIRS = "/workspace/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/workspace/OpenSpace", OPENSPACE_BACKEND_SCOPE = "shell,mcp,system" }
+
 [local_exceptions.shared_gateway]
 # 记录被统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
 reason = "共享型 MCP 统一放入 shared-gateway，便于统一观测与配置管理。"
 
-[local_exceptions.openclaw]
-# 示例：仍保留本地直连的宿主能力。
-keep_local = ["openspace"]
-reason = "OpenSpace 强依赖宿主上下文与本地工作区，继续保留直连。"
-endpoint = "http://127.0.0.1:8081/mcp"
-
 # 注意：
-# 这里的 endpoint 往往仍然描述“宿主侧能力”，
-# 其用途更多是记录拓扑关系，而不是要求容器内必须直连这个地址。
+# OpenSpace 在容器场景下通常不再保留为本地特例，
+# 而是通过源码挂载 + 环境变量注入的方式直接进入 shared-gateway。

@@ -12,10 +12,21 @@ services:
       # 示例环境变量：按你的实际挂载路径调整。
       OBSIDIAN_VAULT_PATH: /workspace/openclaw-workspace
       PYTHONPATH: /workspace/mempalace
+      # OpenSpace 依赖的 LLM / 社区凭证建议通过环境变量透传给容器。
+      OPENSPACE_API_KEY: ${OPENSPACE_API_KEY:-}
+      OPENSPACE_MODEL: ${OPENSPACE_MODEL:-}
+      OPENSPACE_LLM_API_KEY: ${OPENSPACE_LLM_API_KEY:-}
+      OPENSPACE_LLM_API_BASE: ${OPENSPACE_LLM_API_BASE:-}
+      OPENSPACE_LLM_CONFIG: ${OPENSPACE_LLM_CONFIG:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       # 下面是案例路径，请替换为你自己的宿主机绝对路径。
       - /opt/mcps:/workspace/mcps:ro
       - /opt/mempalace:/workspace/mempalace:ro
+      # OpenSpace 运行时会写 logs / .openspace，建议使用 rw 挂载。
+      - /opt/OpenSpace:/workspace/OpenSpace:rw
       - /opt/openclaw-workspace:/workspace/openclaw-workspace:rw
       - /opt/mempalace-data:/root/.mempalace:rw
     healthcheck:

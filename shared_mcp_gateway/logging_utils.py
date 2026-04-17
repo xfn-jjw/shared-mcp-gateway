@@ -45,6 +45,20 @@ def to_logfmt(event: str, /, **fields: Any) -> str:
     return " ".join(parts)
 
 
+def _quiet_noisy_loggers() -> None:
+    """压低第三方库的高频 INFO 日志，避免 docker logs 被协议细节刷屏。"""
+
+    noisy_logger_levels = {
+        # MCP SDK 自带的“Processing request of type ...”日志非常高频，
+        # 对日常排障价值不大，默认提升到 WARNING。
+        "mcp.server.lowlevel.server": logging.WARNING,
+        "mcp.server.streamable_http": logging.WARNING,
+        "mcp.server.streamable_http_manager": logging.WARNING,
+    }
+    for logger_name, level in noisy_logger_levels.items():
+        logging.getLogger(logger_name).setLevel(level)
+
+
 def configure_structured_logging(log_level: str, *, stream: TextIO | None = None) -> None:
     """初始化标准库 logging，并统一使用 logfmt 风格输出。"""
 
@@ -53,6 +67,8 @@ def configure_structured_logging(log_level: str, *, stream: TextIO | None = None
         format="ts=%(asctime)s level=%(levelname)s logger=%(name)s %(message)s",
         stream=stream or sys.stderr,
     )
+    _quiet_noisy_loggers()
+
 
 
 def log_event(logger: logging.Logger, level: int, event: str, /, **fields: Any) -> None:
