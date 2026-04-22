@@ -17,33 +17,48 @@ const props = defineProps({
   },
 })
 
-const selectedClientIp = ref('all')
+// 左侧选中项使用“caller@ip”复合键，确保同一 IP 下的不同调用端不会互相覆盖。
+const selectedClientKey = ref('all')
+// 失败日志开关：用单独按钮在“全部日志 / 最近失败日志”之间切换。
+const errorOnly = ref(false)
 
 // 当后端返回的新 IP 列表里已经没有当前选中项时，自动回退到“全部”，
 // 避免页面停留在一个已经过期的过滤条件上。
 watch(
   () => props.recentClients,
   (clients) => {
-    const exists = clients.some((client) => client.clientIp === selectedClientIp.value)
-    if (selectedClientIp.value !== 'all' && !exists) {
-      selectedClientIp.value = 'all'
+    const exists = clients.some((client) => (client.clientKey || client.clientIp) === selectedClientKey.value)
+    if (selectedClientKey.value !== 'all' && !exists) {
+      selectedClientKey.value = 'all'
     }
   },
   { deep: true },
 )
 
 const selectedClient = computed(() => {
-  if (selectedClientIp.value === 'all') {
+  if (selectedClientKey.value === 'all') {
     return null
   }
-  return props.recentClients.find((client) => client.clientIp === selectedClientIp.value) || null
+  return (
+    props.recentClients.find((client) => (client.clientKey || client.clientIp) === selectedClientKey.value) ||
+    null
+  )
 })
 
 const filteredLogs = computed(() => {
-  if (selectedClientIp.value === 'all') {
-    return props.recentLogs
+  const baseLogs =
+    selectedClientKey.value === 'all'
+      ? props.recentLogs
+      : props.recentLogs.filter((log) => {
+          const currentKey = `${log.caller || 'unknown'}@${log.clientIp || '-'}`
+          return currentKey === selectedClientKey.value
+        })
+
+  // 关键筛选：支持只看失败记录，方便快速定位每个调用端的错误日志。
+  if (errorOnly.value) {
+    return baseLogs.filter((log) => ['error', 'exception', 'circuit_open'].includes(String(log.status)))
   }
-  return props.recentLogs.filter((log) => log.clientIp === selectedClientIp.value)
+  return baseLogs
 })
 
 const totalErrors = computed(
@@ -60,8 +75,8 @@ const serverDisplayMap = computed(() => {
   return new Map(entries)
 })
 
-function selectClient(clientIp) {
-  selectedClientIp.value = clientIp
+function selectClient(clientKey) {
+  selectedClientKey.value = clientKey
 }
 
 function statusClass(status) {
@@ -71,6 +86,7 @@ function statusClass(status) {
 }
 
 function eventLabel(log) {
+  if (log.eventType === 'mcp_request') return 'MCP 请求'
   return log.eventType === 'tool_call' ? 'Tool 调用' : 'HTTP 请求'
 }
 
@@ -85,6 +101,9 @@ function mcpLabel(log) {
   }
   if (log.tool && String(log.tool).includes('.')) {
     return formatMcpName(String(log.tool).split('.')[0])
+  }
+  if (log.eventType === 'mcp_request') {
+    return '全部 MCP'
   }
   return '-'
 }
@@ -102,12 +121,16 @@ function targetLabel(log) {
 function displayTime(value) {
   return formatGatewayTime(value)
 }
+
+function toggleErrorOnly() {
+  errorOnly.value = !errorOnly.value
+}
 </script>
 
 <template>
   <section class="panel">
     <div class="panel-header">
-      <h2>接入 IP 与调用日志</h2>
+      <h2>接入端与调用日志</h2>
       <div class="panel-meta">
         最近 IP：{{ recentClients.length }} · 最近日志：{{ recentLogs.length }} · 错误：{{ totalErrors }}
       </div>
@@ -117,24 +140,24 @@ function displayTime(value) {
       <aside class="client-sidebar">
         <button
           class="client-card"
-          :class="{ active: selectedClientIp === 'all' }"
+          :class="{ active: selectedClientKey === 'all' }"
           type="button"
           @click="selectClient('all')"
         >
           <div class="client-ip">全部客户端</div>
-          <div class="client-meta">显示所有接入人的最近 HTTP / Tool 调用</div>
+          <div class="client-meta">显示所有接入人的最近 HTTP / Tool 调用与错误</div>
         </button>
 
         <button
           v-for="client in recentClients"
-          :key="client.clientIp"
+          :key="client.clientKey || `${client.caller || 'unknown'}@${client.clientIp}`"
           class="client-card"
-          :class="{ active: selectedClientIp === client.clientIp }"
+          :class="{ active: selectedClientKey === (client.clientKey || `${client.caller || 'unknown'}@${client.clientIp}`) }"
           type="button"
-          @click="selectClient(client.clientIp)"
+          @click="selectClient(client.clientKey || `${client.caller || 'unknown'}@${client.clientIp}`)"
         >
-          <div class="client-ip">{{ client.clientIp }}</div>
-          <div class="client-meta">{{ client.caller || 'unknown' }}</div>
+          <div class="client-ip">{{ client.caller || 'unknown' }}</div>
+          <div class="client-meta mono">{{ client.clientIp }}</div>
           <div class="client-stats">
             <span>调用 {{ client.eventCount }}</span>
             <span>Tool {{ client.toolCalls }}</span>
@@ -153,17 +176,29 @@ function displayTime(value) {
       <div class="log-panel">
         <div class="selection-bar">
           <div>
-            <strong>{{ selectedClient ? selectedClient.clientIp : '全部客户端' }}</strong>
+            <strong>{{ selectedClient ? (selectedClient.caller || 'unknown') : '全部客户端' }}</strong>
             <span class="muted">
-              {{ selectedClient ? ` · ${selectedClient.caller || 'unknown'}` : ' · 查看全部最近调用' }}
+              {{ selectedClient ? ` · ${selectedClient.clientIp || '-'}` : ' · 查看全部最近调用' }}
             </span>
           </div>
-          <div v-if="selectedClient" class="muted">
-            最近：{{ displayTime(selectedClient.lastSeenAt) }}
+          <div class="selection-actions">
+            <button
+              class="filter-toggle"
+              :class="{ active: errorOnly }"
+              type="button"
+              @click="toggleErrorOnly"
+            >
+              {{ errorOnly ? '查看全部日志' : '查看最近失败日志' }}
+            </button>
+            <div v-if="selectedClient" class="muted">
+              最近：{{ displayTime(selectedClient.lastSeenAt) }}
+            </div>
           </div>
         </div>
 
-        <div v-if="filteredLogs.length === 0" class="empty-state">暂无调用日志。</div>
+        <div v-if="filteredLogs.length === 0" class="empty-state">
+          {{ errorOnly ? '暂无错误日志。' : '暂无调用日志。' }}
+        </div>
         <div v-else class="table-wrap">
           <table>
             <thead>
@@ -272,6 +307,36 @@ function displayTime(value) {
 
 .empty-state {
   padding: 32px 20px;
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  background: rgba(96, 165, 250, 0.08);
+  color: #d7e1ff;
+  font-size: 13px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.filter-toggle:hover {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.filter-toggle.active {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(239, 68, 68, 0.14);
+  color: #ffe4e6;
 }
 
 .table-wrap {

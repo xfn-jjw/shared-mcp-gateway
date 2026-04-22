@@ -13,12 +13,15 @@ from typing import Any
 import anyio
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared.exceptions import McpError
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
 
 
 LOGGER = logging.getLogger("shared_mcp_gateway.stdio_bridge")
+START_RETRY_ATTEMPTS = 5
+START_RETRY_BASE_DELAY_SECONDS = 1.0
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -40,6 +43,7 @@ class RemoteGatewayBridge:
 
         self.url = url
         self.caller = caller
+        # 连接资源用 AsyncExitStack 托管；重连时会整栈替换，确保旧连接彻底回收。
         self._stack = AsyncExitStack()
         self._session: ClientSession | None = None
         # 所有 MCP 请求串行经过同一个 session，避免并发写读打乱底层流状态。
@@ -53,6 +57,9 @@ class RemoteGatewayBridge:
         """建立到共享网关的 HTTP MCP 会话，并完成 initialize 握手。"""
 
         try:
+            # 关键设计：每次 start 都创建一套新的 ExitStack。
+            # 这样在自动重连场景下，不会复用已经关闭过的上下文栈。
+            self._stack = AsyncExitStack()
             read_stream, write_stream, _session_id_cb = await self._stack.enter_async_context(
                 streamablehttp_client(self.url, headers=self._headers)
             )
@@ -80,6 +87,42 @@ class RemoteGatewayBridge:
             await self.close()
             raise
 
+    async def ensure_started(self, *, operation: str, target: str) -> None:
+        """在 gateway 重启或短暂抖动时，带有限重试地建立 bridge 连接。"""
+
+        if self._session is not None:
+            return
+
+        last_error: Exception | None = None
+        for attempt in range(1, START_RETRY_ATTEMPTS + 1):
+            try:
+                await self.start()
+                return
+            except Exception as exc:
+                last_error = exc
+                retryable = self._should_retry_start_after_error(exc)
+                if not retryable or attempt >= START_RETRY_ATTEMPTS:
+                    raise
+
+                delay_seconds = START_RETRY_BASE_DELAY_SECONDS * attempt
+                log_event(
+                    LOGGER,
+                    logging.WARNING,
+                    "stdio_bridge_start_retrying",
+                    caller=self.caller,
+                    operation=operation,
+                    target=target,
+                    attempt=attempt,
+                    max_attempts=START_RETRY_ATTEMPTS,
+                    delay_seconds=delay_seconds,
+                    error_type=type(exc).__name__,
+                    error_summary=str(exc),
+                )
+                await anyio.sleep(delay_seconds)
+
+        if last_error is not None:
+            raise last_error
+
     async def close(self) -> None:
         """关闭所有异步上下文，确保网络连接与后台任务被正确回收。"""
 
@@ -104,52 +147,180 @@ class RemoteGatewayBridge:
             raise RuntimeError("Bridge session is not initialized")
         return self._session
 
+    def _should_reconnect_after_error(self, exc: Exception) -> bool:
+        """判断异常是否意味着远端 HTTP MCP session 已失效，需要整连接重建。
+
+        当前重点覆盖两类场景：
+        1. Streamable HTTP server 在 session 不存在/过期时返回 404；
+        2. mcp Python SDK 会把该 404 转换成 JSON-RPC error：`Session terminated`。
+        """
+
+        if isinstance(exc, McpError):
+            message = (getattr(exc.error, "message", "") or "").lower()
+            if any(
+                token in message
+                for token in (
+                    "session terminated",
+                    "session not found",
+                    "invalid or expired session id",
+                    "invalid session id",
+                )
+            ):
+                return True
+
+        text = str(exc).lower()
+        return any(
+            token in text
+            for token in (
+                "session terminated",
+                "session not found",
+                "invalid or expired session id",
+                "404",
+                "not found",
+            )
+        )
+
+    def _should_retry_start_after_error(self, exc: Exception) -> bool:
+        """判断 bridge 启动失败时是否值得稍后重试。"""
+
+        if self._should_reconnect_after_error(exc):
+            return True
+
+        text = str(exc).lower()
+        return any(
+            token in text
+            for token in (
+                "connecterror",
+                "connection refused",
+                "connection reset",
+                "connection aborted",
+                "connection closed",
+                "timed out",
+                "timeout",
+                "readerror",
+                "writeerror",
+                "network is unreachable",
+                "server disconnected",
+                "all connection attempts failed",
+            )
+        )
+
+    async def _reconnect_locked(self, *, operation: str, target: str, reason: Exception) -> None:
+        """在持有 `_lock` 的前提下重建远端会话。
+
+        这里必须“先关后开”：
+        - 先清理旧的 stream/session/background task；
+        - 再走一次 initialize 握手，拿到新的 `mcp-session-id`。
+        """
+
+        log_event(
+            LOGGER,
+            logging.WARNING,
+            "stdio_bridge_reconnecting",
+            caller=self.caller,
+            operation=operation,
+            target=target,
+            error_type=type(reason).__name__,
+            error_summary=str(reason),
+        )
+        await self.close()
+        await self.ensure_started(operation=operation, target=target)
+
+    async def _invoke_with_reconnect(
+        self,
+        *,
+        operation: str,
+        target: str,
+        action,
+    ):
+        """统一封装一次“调用 + 失效检测 + 自动重连 + 单次重试”。
+
+        为什么只重试一次：
+        - 目标是修复“旧 session 失效”这一类确定性问题；
+        - 若重建后仍失败，说明是业务错误或真实下游故障，直接抛出更利于排障。
+        """
+
+        async with self._lock:
+            # bridge 进程刚启动或曾经清理过连接时，先确保 session 已初始化。
+            if self._session is None:
+                await self.ensure_started(operation=operation, target=target)
+
+            try:
+                return await action(self._require_session())
+            except Exception as exc:
+                if not self._should_reconnect_after_error(exc):
+                    raise
+
+                await self._reconnect_locked(operation=operation, target=target, reason=exc)
+                return await action(self._require_session())
+
     async def list_tools(self) -> list[types.Tool]:
         """透传工具列表，并复用串行锁保证 session 安全。"""
 
-        async with self._lock:
-            result = await self._require_session().list_tools()
+        result = await self._invoke_with_reconnect(
+            operation="list_tools",
+            target="*",
+            action=lambda session: session.list_tools(),
+        )
         return result.tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
         """转发工具调用。"""
 
-        async with self._lock:
-            return await self._require_session().call_tool(name, arguments)
+        return await self._invoke_with_reconnect(
+            operation="call_tool",
+            target=name,
+            action=lambda session: session.call_tool(name, arguments),
+        )
 
     async def list_resources(self) -> list[types.Resource]:
         """转发资源列表查询。"""
 
-        async with self._lock:
-            result = await self._require_session().list_resources()
+        result = await self._invoke_with_reconnect(
+            operation="list_resources",
+            target="*",
+            action=lambda session: session.list_resources(),
+        )
         return result.resources
 
     async def read_resource(self, uri: str) -> list[ReadResourceContents]:
         """读取资源，并把返回内容转换成 lowlevel helper 所需格式。"""
 
-        async with self._lock:
-            result = await self._require_session().read_resource(uri)
+        result = await self._invoke_with_reconnect(
+            operation="read_resource",
+            target=uri,
+            action=lambda session: session.read_resource(uri),
+        )
         return [_to_helper_content(item) for item in result.contents]
 
     async def list_resource_templates(self) -> list[types.ResourceTemplate]:
         """转发资源模板列表查询。"""
 
-        async with self._lock:
-            result = await self._require_session().list_resource_templates()
+        result = await self._invoke_with_reconnect(
+            operation="list_resource_templates",
+            target="*",
+            action=lambda session: session.list_resource_templates(),
+        )
         return result.resourceTemplates
 
     async def list_prompts(self) -> list[types.Prompt]:
         """转发 prompt 列表查询。"""
 
-        async with self._lock:
-            result = await self._require_session().list_prompts()
+        result = await self._invoke_with_reconnect(
+            operation="list_prompts",
+            target="*",
+            action=lambda session: session.list_prompts(),
+        )
         return result.prompts
 
     async def get_prompt(self, name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
         """转发 prompt 获取请求。"""
 
-        async with self._lock:
-            return await self._require_session().get_prompt(name, arguments)
+        return await self._invoke_with_reconnect(
+            operation="get_prompt",
+            target=name,
+            action=lambda session: session.get_prompt(name, arguments),
+        )
 
 
 def _to_helper_content(content_item: types.TextResourceContents | types.BlobResourceContents) -> ReadResourceContents:
@@ -215,7 +386,7 @@ async def serve_stdio(url: str, caller: str) -> None:
     """启动 stdio bridge 的完整生命周期。"""
 
     bridge = RemoteGatewayBridge(url, caller)
-    await bridge.start()
+    await bridge.ensure_started(operation="startup", target="gateway")
     server = build_server(bridge)
     initialization_options = server.create_initialization_options(
         notification_options=NotificationOptions(),

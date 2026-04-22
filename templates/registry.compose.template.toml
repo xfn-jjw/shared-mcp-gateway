@@ -23,12 +23,15 @@ description = "Shared MCP gateway for containerized deployment."
 
 [[servers]]
 # mempalace 容器内示例。
+# 如果把宿主机 ~/.mempalace 挂到容器里，建议同时显式覆盖
+# MEMPALACE_PALACE_PATH，避免 config.json 中的宿主机绝对路径
+# 在容器内失效，进而出现 "No palace found"。
 key = "mempalace"
 enabled = true
 namespace = "mempalace"
 command = "/usr/local/bin/python"
 args = ["-m", "mempalace.mcp_server"]
-env = { PYTHONPATH = "/workspace/mempalace" }
+env = { PYTHONPATH = "/workspace/mempalace", MEMPALACE_PALACE_PATH = "/root/.mempalace/palace" }
 
 [[servers]]
 # mysql connector 容器内示例。
@@ -67,9 +70,23 @@ command = "/usr/local/bin/python"
 args = ["-m", "openspace.mcp_server"]
 env = { PYTHONPATH = "/workspace/OpenSpace", OPENSPACE_HOST_SKILL_DIRS = "/workspace/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/workspace/OpenSpace", OPENSPACE_BACKEND_SCOPE = "shell,mcp,system" }
 
+[[servers]]
+# Apifox 容器内示例。
+# 官方 MCP Server 通过 npm 包分发，这里使用 npx 直接启动。
+# 支持三种接入方式：
+# - APIFOX_PROJECT_ID：项目模式（需要 APIFOX_ACCESS_TOKEN）
+# - APIFOX_SITE_ID：文档站点模式
+# - APIFOX_OAS：直接读取本地/远程 OpenAPI 文件
+# 可选 APIFOX_API_BASE_URL：私有化部署地址。
+key = "apifox"
+enabled = true
+namespace = "apifox"
+command = "/bin/bash"
+args = ["-lc", "set -e; APIFOX_ARGS=''; if [ -n \"$APIFOX_PROJECT_ID\" ]; then if [ -z \"$APIFOX_ACCESS_TOKEN\" ]; then echo 'APIFOX_ACCESS_TOKEN is required when APIFOX_PROJECT_ID is set' >&2; exit 1; fi; APIFOX_ARGS=\"--project-id=$APIFOX_PROJECT_ID\"; elif [ -n \"$APIFOX_SITE_ID\" ]; then APIFOX_ARGS=\"--site-id=$APIFOX_SITE_ID\"; elif [ -n \"$APIFOX_OAS\" ]; then APIFOX_ARGS=\"--oas=$APIFOX_OAS\"; else echo 'One of APIFOX_PROJECT_ID / APIFOX_SITE_ID / APIFOX_OAS is required for apifox MCP' >&2; exit 1; fi; exec npx -y apifox-mcp-server@latest $APIFOX_ARGS ${APIFOX_API_BASE_URL:+--apifox-api-base-url=\"$APIFOX_API_BASE_URL\"}"]
+
 [local_exceptions.shared_gateway]
 # 记录被统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "apifox"]
 reason = "共享型 MCP 统一放入 shared-gateway，便于统一观测与配置管理。"
 
 # 注意：

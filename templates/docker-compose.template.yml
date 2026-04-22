@@ -9,8 +9,9 @@ services:
     # 网关是基础设施型组件，建议默认随宿主机重启自动拉起。
     restart: unless-stopped
     ports:
-      # 把容器内 8787 暴露到宿主机，仅绑定本机回环地址。
-      - "127.0.0.1:8787:8787"
+      # 把容器内 8787 暴露到宿主机所有网卡，便于局域网通过 http://宿主机IP:8787 访问。
+      # 如果只想本机访问，可改回 127.0.0.1:8787:8787。
+      - "8787:8787"
     environment:
       # 根据你的下游 MCP 实际依赖补充环境变量。
       OBSIDIAN_VAULT_PATH: /workspace/openclaw-workspace
@@ -19,6 +20,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENSPACE_API_KEY: ${OPENSPACE_API_KEY:-}
+      APIFOX_ACCESS_TOKEN: ${APIFOX_ACCESS_TOKEN:-}
+      APIFOX_PROJECT_ID: ${APIFOX_PROJECT_ID:-}
+      APIFOX_SITE_ID: ${APIFOX_SITE_ID:-}
+      APIFOX_OAS: ${APIFOX_OAS:-}
+      APIFOX_API_BASE_URL: ${APIFOX_API_BASE_URL:-}
     volumes:
       # 下面这些路径请替换成你自己的绝对路径。
       # 原则：

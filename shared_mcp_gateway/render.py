@@ -22,13 +22,15 @@ def _resolve_python_bin(project_root: Path) -> Path:
 
     override = os.environ.get('SHARED_MCP_GATEWAY_PYTHON')
     if override:
-        return Path(override).expanduser().resolve()
+        return Path(override).expanduser()
 
     project_venv_python = project_root / '.venv' / 'bin' / 'python'
     if project_venv_python.exists():
-        return project_venv_python.resolve()
+        # 不要 resolve 到真实解释器目标，否则会把 venv 的 python 软链
+        # 展开成宿主机裸解释器路径，导致丢失虚拟环境依赖上下文。
+        return project_venv_python
 
-    return Path(sys.executable).resolve()
+    return Path(sys.executable)
 
 
 def _bridge_command(project_root: Path, registry: Registry, caller: str) -> str:

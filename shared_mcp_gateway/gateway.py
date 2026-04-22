@@ -44,7 +44,7 @@ from shared_mcp_gateway.logging_utils import configure_structured_logging, log_e
 
 
 LOGGER = logging.getLogger("shared_mcp_gateway.gateway")
-UNKNOWN_METHOD_MARKER = "Unknown method"
+UNKNOWN_METHOD_MARKERS = ("Unknown method", "Method not found")
 RESOURCE_PREFIX = "/resource/"
 HEARTBEAT_INTERVAL_SECONDS = 30 * 60
 FAILURE_ALERT_THRESHOLD = 3
@@ -115,6 +115,9 @@ class GatewayActivityEvent:
     request_id: str
     client_ip: str
     caller: str
+    # operation 用于记录 MCP 语义层动作，如 list_tools / read_resource / get_prompt。
+    # 这样 dashboard 就不必只看到一堆 POST /mcp，而能看到真正的 MCP 调用意图。
+    operation: str | None = None
     method: str | None = None
     path: str | None = None
     tool: str | None = None
@@ -132,6 +135,7 @@ class GatewayActivityEvent:
             "requestId": self.request_id,
             "clientIp": self.client_ip,
             "caller": self.caller,
+            "operation": self.operation,
             "method": self.method,
             "path": self.path,
             "tool": self.tool,
@@ -753,6 +757,7 @@ class SharedMcpGateway:
         request_id: str,
         client_ip: str,
         caller: str,
+        operation: str | None = None,
         method: str | None = None,
         path: str | None = None,
         tool: str | None = None,
@@ -770,6 +775,7 @@ class SharedMcpGateway:
                 request_id=request_id or '-',
                 client_ip=client_ip or '-',
                 caller=caller or 'unknown',
+                operation=operation,
                 method=method,
                 path=path,
                 tool=tool,
@@ -815,6 +821,7 @@ class SharedMcpGateway:
 
         context = _get_request_context()
         self.metrics.mark_operation("list_tools", context.caller)
+        started = time.perf_counter()
         log_event(
             LOGGER,
             logging.INFO,
@@ -835,6 +842,16 @@ class SharedMcpGateway:
                     }
                 )
             )
+        self.record_activity(
+            event_type="mcp_request",
+            request_id=context.request_id,
+            client_ip=context.client_ip,
+            caller=context.caller,
+            operation="list_tools",
+            method="list_tools",
+            status="success",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         return tools
 
     async def call_tool(self, public_name: str, arguments: dict[str, Any]) -> types.CallToolResult:
@@ -985,6 +1002,7 @@ class SharedMcpGateway:
 
         context = _get_request_context()
         self.metrics.mark_operation("list_resources", context.caller)
+        started = time.perf_counter()
         log_event(
             LOGGER,
             logging.INFO,
@@ -1006,6 +1024,16 @@ class SharedMcpGateway:
                     }
                 )
             )
+        self.record_activity(
+            event_type="mcp_request",
+            request_id=context.request_id,
+            client_ip=context.client_ip,
+            caller=context.caller,
+            operation="list_resources",
+            method="list_resources",
+            status="success",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         return resources
 
     async def read_resource(self, public_uri: str) -> list[ReadResourceContents]:
@@ -1048,10 +1076,35 @@ class SharedMcpGateway:
                 target=public_uri,
                 exc=exc,
             )
+            self.record_activity(
+                event_type="mcp_request",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                operation="read_resource",
+                method="read_resource",
+                path=public_uri,
+                downstream=connection.config.key,
+                status="exception",
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                error_summary=_summarize_exception(exc),
+            )
             raise
 
         self._mark_success(f"read_resource:{connection.config.namespace}")
         self._record_transport_success(connection.config.key, source="read_resource")
+        self.record_activity(
+            event_type="mcp_request",
+            request_id=context.request_id,
+            client_ip=context.client_ip,
+            caller=context.caller,
+            operation="read_resource",
+            method="read_resource",
+            path=public_uri,
+            downstream=connection.config.key,
+            status="success",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         log_event(
             LOGGER,
             logging.INFO,
@@ -1070,6 +1123,7 @@ class SharedMcpGateway:
 
         context = _get_request_context()
         self.metrics.mark_operation("list_resource_templates", context.caller)
+        started = time.perf_counter()
         log_event(
             LOGGER,
             logging.INFO,
@@ -1095,6 +1149,16 @@ class SharedMcpGateway:
                     }
                 )
             )
+        self.record_activity(
+            event_type="mcp_request",
+            request_id=context.request_id,
+            client_ip=context.client_ip,
+            caller=context.caller,
+            operation="list_resource_templates",
+            method="list_resource_templates",
+            status="success",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         return templates
 
     def list_prompts(self) -> list[types.Prompt]:
@@ -1102,6 +1166,7 @@ class SharedMcpGateway:
 
         context = _get_request_context()
         self.metrics.mark_operation("list_prompts", context.caller)
+        started = time.perf_counter()
         log_event(
             LOGGER,
             logging.INFO,
@@ -1122,6 +1187,16 @@ class SharedMcpGateway:
                     }
                 )
             )
+        self.record_activity(
+            event_type="mcp_request",
+            request_id=context.request_id,
+            client_ip=context.client_ip,
+            caller=context.caller,
+            operation="list_prompts",
+            method="list_prompts",
+            status="success",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         return prompts
 
     async def get_prompt(self, public_name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
@@ -1168,10 +1243,35 @@ class SharedMcpGateway:
                 target=public_name,
                 exc=exc,
             )
+            self.record_activity(
+                event_type="mcp_request",
+                request_id=context.request_id,
+                client_ip=context.client_ip,
+                caller=context.caller,
+                operation="get_prompt",
+                method="get_prompt",
+                path=public_name,
+                downstream=connection.config.key,
+                status="exception",
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                error_summary=_summarize_exception(exc),
+            )
             raise
 
         self._mark_success(f"get_prompt:{public_name}")
         self._record_transport_success(connection.config.key, source="get_prompt")
+        self.record_activity(
+            event_type="mcp_request",
+            request_id=context.request_id,
+            client_ip=context.client_ip,
+            caller=context.caller,
+            operation="get_prompt",
+            method="get_prompt",
+            path=public_name,
+            downstream=connection.config.key,
+            status="success",
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         log_event(
             LOGGER,
             logging.INFO,
@@ -1404,14 +1504,14 @@ class SharedMcpGateway:
 async def _optional_request(server_key: str, method_name: str, func):
     """执行可选 MCP 方法。
 
-    某些下游只实现 tools，不实现 resources / prompts；遇到 `Unknown method`
+    某些下游只实现 tools，不实现 resources / prompts；遇到“方法不存在”
     时返回 `None` 表示“能力缺失但连接正常”，其余异常仍按真实故障处理。
     """
 
     try:
         return await func()
     except McpError as exc:
-        if UNKNOWN_METHOD_MARKER in str(exc):
+        if any(marker in str(exc) for marker in UNKNOWN_METHOD_MARKERS):
             log_event(
                 LOGGER,
                 logging.INFO,
@@ -1446,16 +1546,24 @@ async def _optional_request(server_key: str, method_name: str, func):
 
 
 def _build_recent_client_rows(recent_logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """按客户端 IP 聚合最近调用，供 dashboard 左侧列表直接使用。"""
+    """按“调用端 caller + 来源 IP”维度聚合最近调用，供 dashboard 左侧列表直接使用。
+
+    这样即便多个 agent 复用同一出口 IP，页面也能把它们拆开显示，
+    避免“每一个调用端”的错误日志被合并到同一张卡片里。
+    """
 
     grouped: dict[str, dict[str, Any]] = {}
     for event in recent_logs:
         client_ip = event.get("clientIp") or "-"
-        row = grouped.get(client_ip)
+        caller = event.get("caller") or "unknown"
+        # 关键聚合键：同时纳入 caller 与 IP，保证同 IP 多调用端也能单独追踪。
+        client_key = f"{caller}@{client_ip}"
+        row = grouped.get(client_key)
         if row is None:
             row = {
+                "clientKey": client_key,
                 "clientIp": client_ip,
-                "caller": event.get("caller") or "unknown",
+                "caller": caller,
                 "lastSeenAt": event.get("timestamp"),
                 "eventCount": 0,
                 "toolCalls": 0,
@@ -1465,7 +1573,7 @@ def _build_recent_client_rows(recent_logs: list[dict[str, Any]]) -> list[dict[st
                 "lastTool": event.get("tool"),
                 "lastDownstream": event.get("downstream"),
             }
-            grouped[client_ip] = row
+            grouped[client_key] = row
 
         row["eventCount"] += 1
         if event.get("eventType") == "tool_call":
@@ -1481,7 +1589,10 @@ def _build_recent_client_rows(recent_logs: list[dict[str, Any]]) -> list[dict[st
         if not row.get("lastDownstream") and event.get("downstream"):
             row["lastDownstream"] = event.get("downstream")
 
-    return sorted(grouped.values(), key=lambda item: (-(item["toolCalls"] + item["httpRequests"]), item["clientIp"]))
+    return sorted(
+        grouped.values(),
+        key=lambda item: (-(item["toolCalls"] + item["httpRequests"]), item["caller"], item["clientIp"]),
+    )
 
 
 def _format_dashboard_time(value: int | float | str | None) -> str | None:
@@ -1574,16 +1685,20 @@ def _build_dashboard_payload(gateway: "SharedMcpGateway") -> dict[str, Any]:
     dead_count = len(server_rows) - alive_count
 
     # 仪表盘访问信息本身会持续轮询，这里只展示更接近“接入人”的真实调用：
-    # 1) tool_call 一定保留；
-    # 2) http_request 只保留非 dashboard/healthz 的入口请求。
+    # 1) tool_call / mcp_request 一定保留；
+    # 2) http_request 只保留非 dashboard/healthz/mcp 的普通入口请求，
+    #    避免页面被 POST /mcp 这种协议层噪音刷屏。
     recent_logs = [
         {
             **event,
             "timestamp": _format_dashboard_time(event.get("timestamp")),
         }
         for event in gateway.recent_activity_snapshot()
-        if event.get("eventType") == "tool_call"
-        or (event.get("eventType") == "http_request" and event.get("path") not in DASHBOARD_ACTIVITY_PATHS | {"/healthz"})
+        if event.get("eventType") in {"tool_call", "mcp_request"}
+        or (
+            event.get("eventType") == "http_request"
+            and event.get("path") not in DASHBOARD_ACTIVITY_PATHS | {"/healthz", gateway.registry.listen.path}
+        )
     ]
     recent_clients = _build_recent_client_rows(recent_logs)
     gateway_info = {
@@ -2221,7 +2336,9 @@ async def create_app(registry: Registry) -> Starlette:
     session_manager = StreamableHTTPSessionManager(
         app=server,
         json_response=False,
-        stateless=False,
+        # 这个网关的真实长生命周期状态主要在下游 stdio 连接里，
+        # 上游 HTTP MCP 改成无状态后，网关重启不会让客户端因旧 session 失效而掉线。
+        stateless=True,
     )
     mcp_app = StreamableHTTPASGIApp(session_manager)
 

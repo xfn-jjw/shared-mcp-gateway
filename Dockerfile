@@ -20,6 +20,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Apifox MCP Server 通过 npm / npx 分发，这里在运行镜像里补齐 Node.js 运行时，
+# 这样 shared-gateway 才能直接在同一个容器内拉起 Node.js 类型的下游 MCP。
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nodejs npm && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /app/requirements-gateway.txt
 RUN python -m pip install --upgrade pip && \
     pip install -r /app/requirements-gateway.txt && \

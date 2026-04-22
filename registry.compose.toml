@@ -20,6 +20,9 @@ description = "Shared MCP gateway for containerized deployment."
 
 [[servers]]
 # mempalace：容器内通过 PYTHONPATH 指向挂载目录。
+# 注意：宿主机 ~/.mempalace/config.json 里常常写的是宿主机绝对路径，
+# 例如 /Users/.../.mempalace/palace。该配置文件会被 volume 原样挂进容器，
+# 若不覆盖，容器内会误读宿主机路径并报 "No palace found"。
 key = "mempalace"
 enabled = true
 namespace = "mempalace"
@@ -27,7 +30,7 @@ language = "Python"
 description = "共享记忆与知识图谱能力，用于写入/检索长期记忆、关系事实、语义搜索与时间线查询。"
 command = "/usr/local/bin/python"
 args = ["-m", "mempalace.mcp_server"]
-env = { PYTHONPATH = "/workspace/mempalace" }
+env = { PYTHONPATH = "/workspace/mempalace", MEMPALACE_PALACE_PATH = "/root/.mempalace/palace" }
 
 [[servers]]
 # mysql-db：直接调用容器内挂载的 server.py。
@@ -72,7 +75,22 @@ command = "/usr/local/bin/python"
 args = ["-m", "openspace.mcp_server"]
 env = { PYTHONPATH = "/workspace/OpenSpace", OPENSPACE_HOST_SKILL_DIRS = "/workspace/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/workspace/OpenSpace", OPENSPACE_BACKEND_SCOPE = "shell,mcp,system" }
 
+[[servers]]
+# apifox：通过 npm 包启动官方 MCP Server。
+# 支持三种接入方式：
+# 1) APIFOX_PROJECT_ID：读取 Apifox 项目（需要 APIFOX_ACCESS_TOKEN）
+# 2) APIFOX_SITE_ID：读取 Apifox 文档站点（公开/共享文档场景）
+# 3) APIFOX_OAS：直接读取 OpenAPI/Swagger 文件或 URL
+# 可选 APIFOX_API_BASE_URL 用于私有化部署。
+key = "apifox"
+enabled = true
+namespace = "apifox"
+language = "Node.js"
+description = "Apifox 项目 MCP 能力，用于读取接口定义、目录、文档与调试相关上下文。"
+command = "/bin/bash"
+args = ["-lc", "set -e; APIFOX_ARGS=''; if [ -n \"$APIFOX_PROJECT_ID\" ]; then if [ -z \"$APIFOX_ACCESS_TOKEN\" ]; then echo 'APIFOX_ACCESS_TOKEN is required when APIFOX_PROJECT_ID is set' >&2; exit 1; fi; APIFOX_ARGS=\"--project-id=$APIFOX_PROJECT_ID\"; elif [ -n \"$APIFOX_SITE_ID\" ]; then APIFOX_ARGS=\"--site-id=$APIFOX_SITE_ID\"; elif [ -n \"$APIFOX_OAS\" ]; then APIFOX_ARGS=\"--oas=$APIFOX_OAS\"; else echo 'One of APIFOX_PROJECT_ID / APIFOX_SITE_ID / APIFOX_OAS is required for apifox MCP' >&2; exit 1; fi; exec npx -y apifox-mcp-server@latest $APIFOX_ARGS ${APIFOX_API_BASE_URL:+--apifox-api-base-url=\"$APIFOX_API_BASE_URL\"}"]
+
 [local_exceptions.shared_gateway]
 # 当前由 shared-gateway 统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "apifox"]
 reason = "共享型 MCP 适合统一收口、统一日志与统一自检。"

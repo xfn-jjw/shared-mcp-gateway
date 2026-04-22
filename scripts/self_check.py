@@ -27,6 +27,16 @@ SAFE_TOOL_CALLS: dict[str, dict[str, Any]] = {
     "mempalace.mempalace_status": {},
     "mysql_db.ping_db": {},
 }
+# 某些下游工具名在启动时会带随机后缀（例如 apifox 的 `*_8zfk2w`），
+# 因此这里改成“按前缀匹配 + 真实调用”的方式，避免仅靠 list_tools 误判为健康。
+SAFE_TOOL_PREFIX_CALLS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "apifox.refresh_project_oas",
+        "namespace": "apifox",
+        "prefix": "apifox.refresh_project_oas_",
+        "arguments": {"_": "self-check"},
+    },
+)
 PRESENCE_ONLY_TOOLS = {
     "obsidian_kb.kb_search_notes",
     "tencent_cls.cls_login",
@@ -96,6 +106,20 @@ class SelfChecker:
     def expected_namespaces(self) -> list[str]:
         """根据注册表推导出本环境应该接入共享网关的 namespace。"""
 
+        # healthz 一旦成功返回，就优先以运行中网关的拓扑为准。
+        # 这样即使宿主机同时存在 `registry.toml` 和 `registry.compose.toml`，
+        # 自检后半程也不会继续沿用过时的本地注册表视角。
+        if self.health_payload is not None:
+            topology = self.health_payload.get("topology", {}) or {}
+            shared_gateway_servers = topology.get("sharedGatewayServers", []) or []
+            namespaces = [
+                str(server.get("namespace"))
+                for server in shared_gateway_servers
+                if server.get("namespace")
+            ]
+            if namespaces:
+                return namespaces
+
         if self.registry is None:
             return ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls"]
         return [server.namespace for server in self.registry.enabled_servers]
@@ -113,20 +137,26 @@ class SelfChecker:
     async def run(self) -> int:
         """串行执行所有检查项，并给出最终退出码。"""
 
-        topology = self._topology_snapshot()
-        self.printer.emit("self_check_scope", mcp_url=self.mcp_url, healthz_url=self.healthz_url, topology=topology)
+        initial_topology = self._topology_snapshot()
+        self.printer.emit(
+            "self_check_scope",
+            mcp_url=self.mcp_url,
+            healthz_url=self.healthz_url,
+            topology=initial_topology,
+        )
 
         await self._run_check("healthz", self.check_healthz)
         await self._run_check("gateway_tools", self.check_gateway_tools)
 
         status = "ok" if all(result.ok for result in self.results) else "failed"
+        summary_topology = self._topology_snapshot()
         summary = {
             "status": status,
             "checkedAt": time.strftime("%Y-%m-%d %H:%M:%S%z"),
             "mcpUrl": self.mcp_url,
             "healthzUrl": self.healthz_url,
             "results": [asdict(result) for result in self.results],
-            "topology": topology,
+            "topology": summary_topology,
             "health": self.health_payload,
         }
         self.printer.emit(
@@ -232,6 +262,7 @@ class SelfChecker:
                 tool_names = {tool.name for tool in tools_result.tools}
                 missing_tools = sorted(self.expected_tools - tool_names)
                 safe_call_results: dict[str, Any] = {}
+                prefix_safe_call_results: dict[str, Any] = {}
 
                 for tool_name, arguments in SAFE_TOOL_CALLS.items():
                     if tool_name not in tool_names:
@@ -245,7 +276,46 @@ class SelfChecker:
                     result = await session.call_tool(tool_name, arguments)
                     safe_call_results[tool_name] = self._summarize_call_result(result)
 
-        ok = not missing_tools and all(item.get("ok", False) for item in safe_call_results.values())
+                # 对带动态后缀的工具做前缀匹配。
+                # 这样 Apifox 即使每次启动都生成不同 tool name，自检也能做真实探活。
+                for spec in SAFE_TOOL_PREFIX_CALLS:
+                    matches = sorted(
+                        tool_name
+                        for tool_name in tool_names
+                        if tool_name.startswith(str(spec["prefix"]))
+                    )
+                    namespace = str(spec["namespace"])
+                    spec_id = str(spec["id"])
+
+                    # 只有当：
+                    # 1) 当前网关确实暴露了该前缀工具；或
+                    # 2) 注册表声明该 namespace 应存在
+                    # 时，才把它纳入失败判定，兼容不同部署拓扑。
+                    should_check = bool(matches) or namespace in self.expected_namespaces
+                    if not should_check:
+                        continue
+
+                    if not matches:
+                        prefix_safe_call_results[spec_id] = {
+                            "ok": False,
+                            "reason": "missing_tool_prefix",
+                            "prefix": spec["prefix"],
+                            "namespace": namespace,
+                        }
+                        continue
+
+                    matched_tool = matches[0]
+                    result = await session.call_tool(matched_tool, dict(spec["arguments"]))
+                    summary = self._summarize_call_result(result)
+                    summary["matchedTool"] = matched_tool
+                    summary["prefix"] = spec["prefix"]
+                    prefix_safe_call_results[spec_id] = summary
+
+        ok = (
+            not missing_tools
+            and all(item.get("ok", False) for item in safe_call_results.values())
+            and all(item.get("ok", False) for item in prefix_safe_call_results.values())
+        )
         return {
             "ok": ok,
             "severity": "info" if ok else "error",
@@ -253,11 +323,28 @@ class SelfChecker:
             "toolCount": len(tool_names),
             "missingTools": missing_tools,
             "safeCallResults": safe_call_results,
+            "prefixSafeCallResults": prefix_safe_call_results,
             "presenceOnlyTools": sorted(PRESENCE_ONLY_TOOLS & tool_names),
         }
 
     def _topology_snapshot(self) -> dict[str, Any]:
         """输出本次自检所依据的拓扑快照，便于排查环境差异。"""
+
+        # 当 healthz 已返回时，优先展示“运行中网关”的真实拓扑，
+        # 让 summary 与本次实际探活对象保持一致。
+        if self.health_payload is not None:
+            topology = self.health_payload.get("topology", {}) or {}
+            shared_gateway_servers = topology.get("sharedGatewayServers", []) or []
+            if shared_gateway_servers:
+                return {
+                    "sharedGatewayNamespaces": [
+                        str(server.get("namespace"))
+                        for server in shared_gateway_servers
+                        if server.get("namespace")
+                    ],
+                    "sharedGatewayServers": shared_gateway_servers,
+                    "localExceptions": topology.get("localExceptions", {}),
+                }
 
         if self.registry is None:
             return {
