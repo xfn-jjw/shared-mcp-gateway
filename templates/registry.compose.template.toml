@@ -1,0 +1,94 @@
+# Shared MCP Gateway 容器内注册表模板。
+# 使用方式：
+# 1. 复制本文件，例如：cp templates/registry.compose.template.toml registry.compose.local.toml
+# 2. 根据容器内挂载路径，替换下面的 command / args / env
+# 3. Compose 启动时，把该文件挂载到容器内并通过 --registry 指定
+
+[listen]
+# 容器内通常监听 0.0.0.0，便于容器端口暴露。
+host = "0.0.0.0"
+port = 8787
+path = "/mcp"
+
+[gateway]
+# 网关名称，会显示给客户端。
+name = "shared-gateway"
+# 聚合后的工具名分隔符。
+namespace_separator = "."
+# 网关描述。
+description = "Shared MCP gateway for containerized deployment."
+
+# 容器版模板的核心区别，不是字段结构不同，
+# 而是所有路径、解释器和依赖都要以“容器内可见路径”为准。
+
+[[servers]]
+# mempalace 容器内示例。
+# 如果把宿主机 ~/.mempalace 挂到容器里，建议同时显式覆盖
+# MEMPALACE_PALACE_PATH，避免 config.json 中的宿主机绝对路径
+# 在容器内失效，进而出现 "No palace found"。
+key = "mempalace"
+enabled = true
+namespace = "mempalace"
+command = "/usr/local/bin/python"
+args = ["-m", "mempalace.mcp_server"]
+env = { PYTHONPATH = "/workspace/mempalace", MEMPALACE_PALACE_PATH = "/root/.mempalace/palace" }
+
+[[servers]]
+# mysql connector 容器内示例。
+# 如果镜像里已经固定好 python 位置，优先直接写绝对路径，减少 shell 包装层。
+key = "mysql-db"
+enabled = true
+namespace = "mysql_db"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/mysql-connector/server.py"]
+
+[[servers]]
+# obsidian-kb 容器内示例。
+# 若依赖额外环境变量，也可以改成 command=/bin/bash + args=["-lc", "..."] 形式。
+key = "obsidian-kb"
+enabled = true
+namespace = "obsidian_kb"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/obsidian-kb-connector/server.py"]
+
+[[servers]]
+# tencent-cls 容器内示例。
+key = "tencent-cls"
+enabled = true
+namespace = "tencent_cls"
+command = "/usr/local/bin/python"
+args = ["/workspace/mcps/tencent-cls-connector/server.py"]
+
+[[servers]]
+# OpenSpace 容器内示例。
+# 推荐通过挂载 OpenSpace 源码目录，再用 python -m openspace.mcp_server 启动。
+# 如果容器是 headless 环境，建议先把 backend scope 收敛到 shell / mcp / system。
+key = "openspace"
+enabled = true
+namespace = "openspace"
+command = "/usr/local/bin/python"
+args = ["-m", "openspace.mcp_server"]
+env = { PYTHONPATH = "/workspace/OpenSpace", OPENSPACE_HOST_SKILL_DIRS = "/workspace/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/workspace/OpenSpace", OPENSPACE_BACKEND_SCOPE = "shell,mcp,system" }
+
+[[servers]]
+# Apifox 容器内示例。
+# 官方 MCP Server 通过 npm 包分发，这里使用 npx 直接启动。
+# 支持三种接入方式：
+# - APIFOX_PROJECT_ID：项目模式（需要 APIFOX_ACCESS_TOKEN）
+# - APIFOX_SITE_ID：文档站点模式
+# - APIFOX_OAS：直接读取本地/远程 OpenAPI 文件
+# 可选 APIFOX_API_BASE_URL：私有化部署地址。
+key = "apifox"
+enabled = true
+namespace = "apifox"
+command = "/bin/bash"
+args = ["-lc", "set -e; APIFOX_ARGS=''; if [ -n \"$APIFOX_PROJECT_ID\" ]; then if [ -z \"$APIFOX_ACCESS_TOKEN\" ]; then echo 'APIFOX_ACCESS_TOKEN is required when APIFOX_PROJECT_ID is set' >&2; exit 1; fi; APIFOX_ARGS=\"--project-id=$APIFOX_PROJECT_ID\"; elif [ -n \"$APIFOX_SITE_ID\" ]; then APIFOX_ARGS=\"--site-id=$APIFOX_SITE_ID\"; elif [ -n \"$APIFOX_OAS\" ]; then APIFOX_ARGS=\"--oas=$APIFOX_OAS\"; else echo 'One of APIFOX_PROJECT_ID / APIFOX_SITE_ID / APIFOX_OAS is required for apifox MCP' >&2; exit 1; fi; exec npx -y apifox-mcp-server@latest $APIFOX_ARGS ${APIFOX_API_BASE_URL:+--apifox-api-base-url=\"$APIFOX_API_BASE_URL\"}"]
+
+[local_exceptions.shared_gateway]
+# 记录被统一纳管的共享能力。
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "apifox"]
+reason = "共享型 MCP 统一放入 shared-gateway，便于统一观测与配置管理。"
+
+# 注意：
+# OpenSpace 在容器场景下通常不再保留为本地特例，
+# 而是通过源码挂载 + 环境变量注入的方式直接进入 shared-gateway。

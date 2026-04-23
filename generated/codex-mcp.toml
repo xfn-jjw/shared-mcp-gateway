@@ -1,0 +1,4 @@
+[mcp_servers.shared-gateway]
+command = "/bin/bash"
+args = ["-lc", "/Users/jervis.jiang/jervis.jiang/shared-mcp-gateway/.venv/bin/python /Users/jervis.jiang/jervis.jiang/shared-mcp-gateway/shared_mcp_gateway/stdio_bridge.py --url http://127.0.0.1:8787/mcp --caller codex"]
+enabled = true

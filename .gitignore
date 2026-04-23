@@ -1,0 +1,25 @@
+# IDE
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# Local runtime/config files
+registry.local.toml
+registry.compose.local.toml
+docker-compose.local.yml
+.env
+.env.*
+.run/
+
+# Frontend build/dependency artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Generated backup artifacts
+generated/*.bak.*

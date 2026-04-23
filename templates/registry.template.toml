@@ -1,0 +1,110 @@
+# Shared MCP Gateway 注册表模板。
+# 使用方式：
+# 1. 复制本文件，例如：cp templates/registry.template.toml registry.local.toml
+# 2. 按实际环境替换下面的路径、端口、命令与参数
+# 3. 启动：python3 shared_mcp_gateway/gateway.py --registry registry.local.toml --log-level INFO
+
+[listen]
+# 网关监听地址。仅本机访问时建议保持 127.0.0.1。
+host = "127.0.0.1"
+# 网关监听端口。
+port = 8787
+# 对外暴露的 MCP HTTP 路径。
+path = "/mcp"
+
+[gateway]
+# 网关名称，会显示给 MCP Client。
+name = "shared-gateway"
+# 聚合后工具名的分隔符，例如 mysql_db.ping_db。
+namespace_separator = "."
+# 网关描述信息。
+description = "Shared MCP gateway for Codex, OpenCode and OpenClaw."
+
+# clients 段本身不会参与运行时转发，
+# 主要用于记录“当前环境里各客户端配置文件放在哪里”，
+# 方便脚本生成、人工排查或团队交接。
+
+[clients.codex]
+# 可选：记录 Codex 配置文件位置，便于后续脚本生成或人工维护。
+config_path = "/Users/your-name/.codex/config.toml"
+
+[clients.opencode]
+# 可选：记录 OpenCode 配置文件位置。
+config_path = "/Users/your-name/.config/opencode/opencode.jsonc"
+
+[clients.openclaw]
+# 可选：记录 OpenClaw 配置文件位置。
+config_path = "/Users/your-name/.openclaw/workspace/mcp.json"
+
+[[servers]]
+# 服务唯一 key，用于日志、自检与熔断状态标识。
+key = "mempalace"
+enabled = true
+# 聚合后的命名空间前缀。
+namespace = "mempalace"
+# 可选：dashboard 展示的实现语言；不填时会按启动命令启发式推断。
+language = "Python"
+# 可选：dashboard 展示的 MCP 用途说明。
+description = "共享记忆与知识图谱能力。"
+# 启动该 MCP Server 的命令。
+command = "/absolute/path/to/mempalace/.venv/bin/python"
+# 启动参数。
+args = ["-m", "mempalace.mcp_server"]
+# 可选：只对当前下游生效的环境变量。
+env = { PYTHONPATH = "/absolute/path/to/mempalace" }
+
+# 约定：
+# - key 用于标识“下游实例”
+# - namespace 用于标识“对外暴露名字前缀”
+# 两者可以相同，也可以不同，但建议保持语义稳定，方便日志排查。
+
+[[servers]]
+# mysql 示例：适合通过 bash -lc 先切目录，再使用项目自己的虚拟环境启动。
+key = "mysql-db"
+enabled = true
+namespace = "mysql_db"
+language = "Python"
+description = "MySQL 只读查询能力。"
+command = "/bin/bash"
+args = ["-lc", "cd /absolute/path/to/mcps/mysql-connector && ./.venv/bin/python server.py"]
+
+[[servers]]
+# obsidian 示例：演示如何把某个下游依赖的环境变量直接内联到启动命令里。
+key = "obsidian-kb"
+enabled = true
+namespace = "obsidian_kb"
+language = "Python"
+description = "Obsidian 知识库读写能力。"
+command = "/bin/bash"
+args = ["-lc", "cd /absolute/path/to/mcps/obsidian-kb-connector && OBSIDIAN_VAULT_PATH=/absolute/path/to/obsidian-vault ./.venv/bin/python server.py"]
+
+[[servers]]
+# tencent-cls 示例：结构与 mysql / obsidian 类似，保持统一治理即可。
+key = "tencent-cls"
+enabled = true
+namespace = "tencent_cls"
+language = "Python"
+description = "腾讯云 CLS 日志检索能力。"
+command = "/bin/bash"
+args = ["-lc", "cd /absolute/path/to/mcps/tencent-cls-connector && ./.venv/bin/python server.py"]
+
+[[servers]]
+# OpenSpace 示例：如果希望所有客户端都通过 shared-gateway 访问它，
+# 直接把 openspace-mcp 作为一个 stdio 下游接入即可。
+key = "openspace"
+enabled = true
+namespace = "openspace"
+language = "Python"
+description = "通用任务执行与技能编排能力。"
+command = "/absolute/path/to/OpenSpace/.venv/bin/openspace-mcp"
+args = []
+env = { OPENSPACE_HOST_SKILL_DIRS = "/absolute/path/to/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/absolute/path/to/OpenSpace" }
+
+[local_exceptions.shared_gateway]
+# 记录当前由 shared-gateway 统一托管的共享能力。
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
+reason = "共享型 MCP 统一纳管，减少多客户端重复配置。"
+
+# local_exceptions 的用途主要是“说明拓扑决策”，
+# 不是网关转发时的硬编码白名单；
+# 它更偏向文档化配置，便于 README / healthz / 排查时理解为什么某些能力没有进网关。
