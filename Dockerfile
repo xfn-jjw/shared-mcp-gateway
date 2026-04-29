@@ -1,4 +1,4 @@
-FROM node:24-alpine AS frontend-builder
+FROM node:24-bookworm-slim AS frontend-builder
 
 WORKDIR /frontend
 
@@ -11,7 +11,7 @@ COPY frontend ./
 RUN npm run build
 
 
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -20,11 +20,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Apifox MCP Server 通过 npm / npx 分发，这里在运行镜像里补齐 Node.js 运行时，
-# 这样 shared-gateway 才能直接在同一个容器内拉起 Node.js 类型的下游 MCP。
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends nodejs npm && \
-    rm -rf /var/lib/apt/lists/*
+# Apifox / Chrome DevTools MCP Server 通过 npm / npx 分发。
+# Chrome DevTools MCP 要求 Node.js v20.19+，因此从官方 Node 24 镜像复制运行时，
+# 避免 Debian apt 默认 nodejs 版本不足。
+COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=frontend-builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    node --version && \
+    npm --version
 
 COPY requirements.txt /app/requirements-gateway.txt
 RUN python -m pip install --upgrade pip && \

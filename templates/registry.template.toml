@@ -100,9 +100,21 @@ command = "/absolute/path/to/OpenSpace/.venv/bin/openspace-mcp"
 args = []
 env = { OPENSPACE_HOST_SKILL_DIRS = "/absolute/path/to/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/absolute/path/to/OpenSpace" }
 
+[[servers]]
+# Chrome DevTools MCP 示例：通过官方 npm 包启动浏览器调试/自动化能力。
+# 宿主机直跑可让它按需启动本机 Chrome；如果要连接已有 Chrome，可设置 CHROME_DEVTOOLS_BROWSER_URL。
+key = "chrome-devtools"
+enabled = true
+namespace = "chrome_devtools"
+language = "Node.js"
+description = "Chrome DevTools 浏览器调试与自动化能力。"
+command = "/bin/bash"
+args = ["/absolute/path/to/shared-mcp-gateway/scripts/run_chrome_devtools_mcp.sh"]
+env = { CHROME_DEVTOOLS_ISOLATED = "true" }
+
 [local_exceptions.shared_gateway]
 # 记录当前由 shared-gateway 统一托管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "chrome_devtools"]
 reason = "共享型 MCP 统一纳管，减少多客户端重复配置。"
 
 # local_exceptions 的用途主要是“说明拓扑决策”，

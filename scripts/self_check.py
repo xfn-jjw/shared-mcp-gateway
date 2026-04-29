@@ -24,6 +24,7 @@ from shared_mcp_gateway.logging_utils import to_logfmt
 DEFAULT_MCP_URL = "http://127.0.0.1:8787/mcp"
 DEFAULT_HEALTHZ_URL = "http://127.0.0.1:8787/healthz"
 SAFE_TOOL_CALLS: dict[str, dict[str, Any]] = {
+    "chrome_devtools.list_pages": {},
     "mempalace.mempalace_status": {},
     "mysql_db.ping_db": {},
 }

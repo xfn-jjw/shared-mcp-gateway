@@ -544,6 +544,10 @@ docker compose logs -f shared-mcp-gateway
 - `mysql-db`
 - `obsidian-kb`
 - `tencent-cls`
+- `arthas`
+- `openspace`
+- `apifox`
+- `chrome-devtools`
 
 拓扑归位说明见：`/path/to/shared-mcp-gateway/docs/mcp-topology.md`
 

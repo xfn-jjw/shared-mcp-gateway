@@ -17,6 +17,9 @@
 | mysql-db | `mysql_db` | 通用数据库只读查询能力，适合集中治理 |
 | obsidian-kb | `obsidian_kb` | 共享知识库查询/写入接口，跨客户端复用 |
 | tencent-cls | `tencent_cls` | 统一日志检索能力，适合集中接入 |
+| arthas | `arthas` | JVM 运行时诊断能力，适合把安全开关、日志与熔断统一治理 |
+| apifox | `apifox` | 接口文档/项目上下文能力，适合多客户端复用同一套 API 知识入口 |
+| chrome-devtools | `chrome_devtools` | 浏览器调试、自动化、网络/性能分析能力，适合统一暴露给多个编码客户端 |
 
 这些 MCP 放进共享网关后，可以统一获得：
 
@@ -30,6 +33,7 @@
 | MCP | namespace | 说明 |
 | --- | --- | --- |
 | OpenSpace | `openspace` | 虽然依赖宿主工作区与技能目录，但它本身支持 stdio MCP，可以通过 env 显式注入宿主上下文后纳入 shared-gateway |
+| Chrome DevTools MCP | `chrome_devtools` | 宿主机直跑时可按需启动本机 Chrome；容器版默认通过 `CHROME_DEVTOOLS_BROWSER_URL` 连接宿主机 remote-debugging Chrome |
 
 宿主机直跑时，OpenSpace 推荐这样接入：
 
@@ -42,6 +46,12 @@
 
 > 例外：如果网关本身运行在 Docker 容器里，需要额外把 OpenSpace 源码、宿主技能目录与 LLM 凭证一起注入容器；
 > 只要这些运行条件满足，容器版也可以直接纳管 OpenSpace。
+
+Chrome DevTools MCP 的容器版默认不在镜像中内置 Chrome，而是连接宿主机 Chrome：
+
+- 宿主机 Chrome 启动 remote debugging 端口，例如 `9222`
+- Compose 默认注入 `CHROME_DEVTOOLS_BROWSER_URL=http://host.docker.internal:9222`
+- 如果要由 MCP 自己启动 Chrome，可清空 `CHROME_DEVTOOLS_BROWSER_URL`，并提供容器内可用的 Chrome 路径与 headless 参数
 
 ## 3. 判断规则
 

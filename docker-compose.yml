@@ -29,6 +29,31 @@ services:
       APIFOX_OAS: ${APIFOX_OAS:-}
       # 可选：私有化/自定义站点时覆盖 API Base URL；公有云通常留空即可。
       APIFOX_API_BASE_URL: ${APIFOX_API_BASE_URL:-}
+      # Chrome DevTools MCP 默认连接宿主机 remote-debugging Chrome。
+      # macOS Docker Desktop 可用 host.docker.internal；宿主机需先以 --remote-debugging-port=9222 启动 Chrome。
+      CHROME_DEVTOOLS_BROWSER_URL: ${CHROME_DEVTOOLS_BROWSER_URL:-http://host.docker.internal:9222}
+      CHROME_DEVTOOLS_WS_ENDPOINT: ${CHROME_DEVTOOLS_WS_ENDPOINT:-}
+      CHROME_DEVTOOLS_WS_HEADERS: ${CHROME_DEVTOOLS_WS_HEADERS:-}
+      CHROME_DEVTOOLS_EXECUTABLE_PATH: ${CHROME_DEVTOOLS_EXECUTABLE_PATH:-}
+      CHROME_DEVTOOLS_CHANNEL: ${CHROME_DEVTOOLS_CHANNEL:-}
+      CHROME_DEVTOOLS_VIEWPORT: ${CHROME_DEVTOOLS_VIEWPORT:-}
+      CHROME_DEVTOOLS_HEADLESS: ${CHROME_DEVTOOLS_HEADLESS:-false}
+      CHROME_DEVTOOLS_ISOLATED: ${CHROME_DEVTOOLS_ISOLATED:-false}
+      CHROME_DEVTOOLS_SLIM: ${CHROME_DEVTOOLS_SLIM:-false}
+      CHROME_DEVTOOLS_MCP_EXTRA_ARGS: ${CHROME_DEVTOOLS_MCP_EXTRA_ARGS:-}
+      # Arthas MCP 默认从容器访问宿主机 Arthas HTTP API；更多线上/测试 profile 可写入 /workspace/mcps/arthas-connector/.env。
+      ARTHAS_DEFAULT_PROFILE: ${ARTHAS_DEFAULT_PROFILE:-local}
+      ARTHAS_LOCAL_MODE: ${ARTHAS_LOCAL_MODE:-direct}
+      ARTHAS_LOCAL_BASE_URL: ${ARTHAS_LOCAL_BASE_URL:-http://host.docker.internal:8563}
+      ARTHAS_LOCAL_7981_MODE: ${ARTHAS_LOCAL_7981_MODE:-direct}
+      ARTHAS_LOCAL_7981_BASE_URL: ${ARTHAS_LOCAL_7981_BASE_URL:-http://host.docker.internal:8564}
+      ARTHAS_LOCAL_TUNNEL_MODE: ${ARTHAS_LOCAL_TUNNEL_MODE:-tunnel}
+      ARTHAS_LOCAL_TUNNEL_TUNNEL_BASE_URL: ${ARTHAS_LOCAL_TUNNEL_TUNNEL_BASE_URL:-http://host.docker.internal:8777}
+      ARTHAS_LOCAL_TUNNEL_APP_NAME: ${ARTHAS_LOCAL_TUNNEL_APP_NAME:-local-test}
+      ARTHAS_LOCAL_TUNNEL_AGENT_ID: ${ARTHAS_LOCAL_TUNNEL_AGENT_ID:-local-test_01}
+      ARTHAS_ENABLE_LOCAL_ATTACH: ${ARTHAS_ENABLE_LOCAL_ATTACH:-false}
+      ARTHAS_ENABLE_RISKY_COMMANDS: ${ARTHAS_ENABLE_RISKY_COMMANDS:-false}
+      ARTHAS_ENABLE_CUSTOM_OGNL: ${ARTHAS_ENABLE_CUSTOM_OGNL:-false}
     volumes:
       # 挂载本机 MCP 源码目录，供容器内网关直接拉起下游 server.py。
       - /Users/jervis.jiang/jervis.jiang/mcps:/workspace/mcps:ro
@@ -36,8 +61,8 @@ services:
       - /Users/jervis.jiang/jervis.jiang/mempalace:/workspace/mempalace:ro
       # OpenSpace 运行时会写 logs / .openspace，因此这里保持 rw。
       - /Users/jervis.jiang/jervis.jiang/OpenSpace:/workspace/OpenSpace:rw
-      # Obsidian / OpenClaw 工作区需要被下游 MCP 读写，保持 rw。
-      - /Users/jervis.jiang/.openclaw/workspace:/workspace/openclaw-workspace:rw
+      # Obsidian Vault 需要被下游 MCP 读写，保持 rw。
+      - /Users/jervis.jiang/jervis.jiang/doc/Obsidian/tc:/workspace/openclaw-workspace:rw
       # 持久化 mempalace 数据，避免容器重建后丢失知识库状态。
       - /Users/jervis.jiang/.mempalace:/root/.mempalace:rw
       # 把 Codex 自带 skills 挂进容器，供 OpenSpace 自动注册。

@@ -289,5 +289,9 @@ docker compose logs -f shared-mcp-gateway
 - `mysql-db`
 - `obsidian-kb`
 - `tencent-cls`
+- `arthas`
+- `openspace`
+- `apifox`
+- `chrome-devtools`
 
 See also: `/path/to/shared-mcp-gateway/docs/mcp-topology.md`

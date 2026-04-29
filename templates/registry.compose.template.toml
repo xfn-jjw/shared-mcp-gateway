@@ -84,9 +84,20 @@ namespace = "apifox"
 command = "/bin/bash"
 args = ["-lc", "set -e; APIFOX_ARGS=''; if [ -n \"$APIFOX_PROJECT_ID\" ]; then if [ -z \"$APIFOX_ACCESS_TOKEN\" ]; then echo 'APIFOX_ACCESS_TOKEN is required when APIFOX_PROJECT_ID is set' >&2; exit 1; fi; APIFOX_ARGS=\"--project-id=$APIFOX_PROJECT_ID\"; elif [ -n \"$APIFOX_SITE_ID\" ]; then APIFOX_ARGS=\"--site-id=$APIFOX_SITE_ID\"; elif [ -n \"$APIFOX_OAS\" ]; then APIFOX_ARGS=\"--oas=$APIFOX_OAS\"; else echo 'One of APIFOX_PROJECT_ID / APIFOX_SITE_ID / APIFOX_OAS is required for apifox MCP' >&2; exit 1; fi; exec npx -y apifox-mcp-server@latest $APIFOX_ARGS ${APIFOX_API_BASE_URL:+--apifox-api-base-url=\"$APIFOX_API_BASE_URL\"}"]
 
+[[servers]]
+# Chrome DevTools MCP 容器内示例。
+# 默认建议连接宿主机 remote-debugging Chrome，例如 Docker Desktop macOS 的 http://host.docker.internal:9222。
+key = "chrome-devtools"
+enabled = true
+namespace = "chrome_devtools"
+language = "Node.js"
+description = "Chrome DevTools 浏览器调试与自动化能力。"
+command = "/bin/bash"
+args = ["/app/scripts/run_chrome_devtools_mcp.sh"]
+
 [local_exceptions.shared_gateway]
 # 记录被统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "apifox"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "apifox", "chrome_devtools"]
 reason = "共享型 MCP 统一放入 shared-gateway，便于统一观测与配置管理。"
 
 # 注意：
