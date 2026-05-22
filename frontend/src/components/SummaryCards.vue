@@ -40,15 +40,35 @@ const cardItems = (summary, indexes) => [
 }
 
 .summary-card {
-  background: rgba(18, 25, 51, 0.92);
-  border: 1px solid #26304f;
-  border-radius: 16px;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, var(--glass-highlight), transparent 38%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-solid) 76%, transparent), var(--panel));
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
   padding: 18px 20px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px) saturate(150%);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.summary-card::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
+  border-radius: 7px;
+  box-shadow: inset 0 1px 0 var(--raised-edge), inset 0 -18px 36px rgba(0, 0, 0, 0.06);
+}
+
+.summary-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--panel-border-strong);
 }
 
 .summary-label {
-  color: #9aa8d6;
+  color: var(--muted);
   font-size: 13px;
   margin-bottom: 10px;
 }
@@ -56,10 +76,11 @@ const cardItems = (summary, indexes) => [
 .summary-value {
   font-size: 30px;
   font-weight: 700;
+  text-shadow: 0 8px 18px color-mix(in srgb, currentColor 24%, transparent);
 }
 
-.tone-blue { color: #60a5fa; }
-.tone-green { color: #22c55e; }
-.tone-red { color: #ef4444; }
-.tone-default { color: #ebf0ff; }
+.tone-blue { color: var(--blue); }
+.tone-green { color: var(--green); }
+.tone-red { color: var(--red); }
+.tone-default { color: var(--text); }
 </style>

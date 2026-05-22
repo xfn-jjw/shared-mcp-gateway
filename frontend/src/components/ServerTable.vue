@@ -154,21 +154,21 @@ table {
 th,
 td {
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--panel-border);
   text-align: left;
   vertical-align: top;
   font-size: 14px;
 }
 
 th {
-  color: #9aa8d6;
+  color: var(--muted);
   font-weight: 600;
   font-size: 13px;
   letter-spacing: 0.02em;
 }
 
 tbody tr:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: linear-gradient(90deg, var(--glass-sheen), var(--panel-soft));
 }
 
 .badge {
@@ -179,34 +179,49 @@ tbody tr:hover {
   font-size: 12px;
   font-weight: 700;
   border: 1px solid transparent;
+  box-shadow: inset 0 1px 0 var(--raised-edge), 0 6px 14px rgba(0, 0, 0, 0.08);
 }
 
 .badge.alive {
-  color: #d1fae5;
-  background: rgba(34, 197, 94, 0.12);
-  border-color: rgba(34, 197, 94, 0.28);
+  color: var(--green-text);
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 28%, transparent);
 }
 
 .badge.dead {
-  color: #fee2e2;
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.28);
+  color: var(--red-text);
+  background: var(--red-soft);
+  border-color: color-mix(in srgb, var(--red) 28%, transparent);
 }
 
 .tool-button,
 .close-button {
-  border: 1px solid rgba(96, 165, 250, 0.35);
-  background: rgba(96, 165, 250, 0.12);
-  color: #dbeafe;
+  border: 1px solid var(--panel-border-strong);
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    linear-gradient(180deg, var(--blue-strong), var(--blue-soft));
+  color: var(--button-text);
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   white-space: nowrap;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px) saturate(145%);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 .tool-button:hover,
 .close-button:hover {
-  background: rgba(96, 165, 250, 0.2);
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    var(--blue-strong);
+  transform: translateY(-1px);
+}
+
+.tool-button:active,
+.close-button:active {
+  transform: translateY(1px);
+  box-shadow: var(--pressed-shadow);
 }
 
 .modal-backdrop {
@@ -217,7 +232,7 @@ tbody tr:hover {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(3, 7, 18, 0.72);
+  background: var(--modal-backdrop);
   backdrop-filter: blur(8px);
 }
 
@@ -226,10 +241,13 @@ tbody tr:hover {
   max-height: min(80vh, 900px);
   overflow: auto;
   padding: 20px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(18, 25, 51, 0.98), rgba(11, 16, 32, 0.98));
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background:
+    linear-gradient(145deg, var(--glass-highlight), transparent 34%),
+    var(--modal-bg);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px) saturate(150%);
 }
 
 .modal-header {
@@ -256,7 +274,7 @@ tbody tr:hover {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
-  color: #9aa8d6;
+  color: var(--muted);
 }
 
 .detail-section + .detail-section {
@@ -265,7 +283,7 @@ tbody tr:hover {
 
 .detail-title {
   margin-bottom: 10px;
-  color: #bfdbfe;
+  color: var(--blue);
   font-weight: 700;
 }
 
@@ -273,7 +291,7 @@ tbody tr:hover {
 .tool-desc,
 .tool-title,
 .empty-tools {
-  color: #c9d5f6;
+  color: var(--subtle);
 }
 
 .tool-list {
@@ -283,13 +301,16 @@ tbody tr:hover {
 
 .tool-item {
   padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background:
+    linear-gradient(145deg, var(--glass-highlight), transparent 40%),
+    var(--panel-soft);
+  box-shadow: inset 0 1px 0 var(--raised-edge), 0 8px 18px rgba(0, 0, 0, 0.08);
 }
 
 .tool-name {
-  color: #ffffff;
+  color: var(--text);
   font-weight: 700;
 }
 
@@ -304,7 +325,7 @@ tbody tr:hover {
 }
 
 .muted {
-  color: #9aa8d6;
+  color: var(--muted);
 }
 
 .mono {
@@ -338,7 +359,7 @@ tbody tr:hover {
   td::before {
     content: attr(data-label);
     display: block;
-    color: #9aa8d6;
+    color: var(--muted);
     font-size: 12px;
     margin-bottom: 4px;
   }

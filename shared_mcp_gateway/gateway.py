@@ -52,6 +52,7 @@ CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3
 CIRCUIT_BREAKER_OPEN_SECONDS = 60
 RECENT_ACTIVITY_LIMIT = 300
 DASHBOARD_ACTIVITY_PATHS = {"/dashboard", "/dashboard/", "/dashboard/data"}
+DASHBOARD_ACTIVITY_PREFIXES = ("/dashboard/assets/",)
 DASHBOARD_DISPLAY_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 ANSI_RESET = "\033[0m"
 ANSI_GREEN = "\033[32m"
@@ -107,7 +108,7 @@ class GatewayActivityEvent:
     这里只保留轻量字段并放入内存环形缓冲区，目的是：
     - 页面上快速看到最近是谁在接入 gateway；
     - 支持按 IP 回看最近一次 HTTP / tool 调用；
-    - 不把原始入参和大段结果落盘，避免膨胀。
+    - 只在内存最近记录里保留 tool 入参与出参，避免长期落盘膨胀。
     """
 
     timestamp: str
@@ -125,6 +126,8 @@ class GatewayActivityEvent:
     status: str | int | None = None
     duration_ms: float | None = None
     error_summary: str | None = None
+    request_json: Any | None = None
+    response_json: Any | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """输出给 dashboard 的稳定 JSON 结构。"""
@@ -143,6 +146,8 @@ class GatewayActivityEvent:
             "status": self.status,
             "durationMs": self.duration_ms,
             "errorSummary": self.error_summary,
+            "requestJson": self.request_json,
+            "responseJson": self.response_json,
         }
 
 
@@ -765,6 +770,8 @@ class SharedMcpGateway:
         status: str | int | None = None,
         duration_ms: float | None = None,
         error_summary: str | None = None,
+        request_json: Any | None = None,
+        response_json: Any | None = None,
     ) -> None:
         """写入最近活动环形缓冲区，供 dashboard 按 IP 回看调用轨迹。"""
 
@@ -783,6 +790,8 @@ class SharedMcpGateway:
                 status=status,
                 duration_ms=duration_ms,
                 error_summary=_truncate_text(error_summary, 300),
+                request_json=request_json,
+                response_json=response_json,
             )
         )
 
@@ -851,6 +860,8 @@ class SharedMcpGateway:
             method="list_tools",
             status="success",
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            request_json={"operation": "list_tools", "arguments": {}},
+            response_json={"count": len(tools), "tools": _to_json_payload(tools)},
         )
         return tools
 
@@ -863,6 +874,7 @@ class SharedMcpGateway:
         context = _get_request_context()
         self.metrics.mark_tool_call(public_name, context.caller)
         connection, original_name, _tool = self._tool_index[public_name]
+        request_json = _build_tool_call_request_json(public_name, original_name, arguments)
         allowed, breaker = self._ensure_breaker_allows(
             connection,
             operation="call_tool",
@@ -872,6 +884,7 @@ class SharedMcpGateway:
         )
         if not allowed:
             # 对 tool 调用返回 MCP 级错误结果，而不是直接抛异常，便于客户端统一消费。
+            circuit_result = _build_circuit_open_call_tool_result(connection, breaker)
             self.record_activity(
                 event_type="tool_call",
                 request_id=context.request_id,
@@ -883,8 +896,10 @@ class SharedMcpGateway:
                 downstream=connection.config.key,
                 status="circuit_open",
                 error_summary=_circuit_open_message(connection, breaker),
+                request_json=request_json,
+                response_json=_to_json_payload(circuit_result),
             )
-            return _build_circuit_open_call_tool_result(connection, breaker)
+            return circuit_result
 
         argument_summary = _summarize_arguments(arguments)
         started = time.perf_counter()
@@ -898,12 +913,14 @@ class SharedMcpGateway:
             downstream=connection.config.key,
             original=original_name,
             args=argument_summary,
+            request_json=request_json,
         )
         try:
             async with connection.lock:
                 # 同一个 session 上串行执行，避免并发 call_tool 破坏底层流状态。
                 result = await connection.session.call_tool(original_name, arguments)
         except Exception as exc:
+            response_json = _build_exception_response_json(exc)
             self._handle_operation_exception(
                 connection,
                 failure_key=f"call_tool:{public_name}",
@@ -925,11 +942,29 @@ class SharedMcpGateway:
                 status="exception",
                 duration_ms=round((time.perf_counter() - started) * 1000, 1),
                 error_summary=_summarize_exception(exc),
+                request_json=request_json,
+                response_json=response_json,
+            )
+            log_event(
+                LOGGER,
+                logging.ERROR,
+                "mcp_call_tool_exception",
+                caller=context.caller,
+                request_id=context.request_id,
+                tool=public_name,
+                downstream=connection.config.key,
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                error_code=response_json["errorCode"],
+                error_summary=response_json["errorSummary"],
+                traceback_summary=response_json["tracebackSummary"],
+                request_json=request_json,
+                response_json=response_json,
             )
             raise
 
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
         result_summary = _summarize_tool_result(result)
+        response_json = _to_json_payload(result)
         error_details = _extract_tool_error_details(result)
         if getattr(result, "isError", False):
             self._mark_failure(
@@ -954,6 +989,8 @@ class SharedMcpGateway:
                 status="error",
                 duration_ms=duration_ms,
                 error_summary=error_details["errorSummary"],
+                request_json=request_json,
+                response_json=response_json,
             )
             log_event(
                 LOGGER,
@@ -968,6 +1005,8 @@ class SharedMcpGateway:
                 error_summary=error_details["errorSummary"],
                 traceback_summary=error_details["tracebackSummary"],
                 result=result_summary,
+                request_json=request_json,
+                response_json=response_json,
             )
         else:
             self._mark_success(f"call_tool:{public_name}")
@@ -983,6 +1022,8 @@ class SharedMcpGateway:
                 downstream=connection.config.key,
                 status="success",
                 duration_ms=duration_ms,
+                request_json=request_json,
+                response_json=response_json,
             )
             log_event(
                 LOGGER,
@@ -994,6 +1035,8 @@ class SharedMcpGateway:
                 downstream=connection.config.key,
                 duration_ms=duration_ms,
                 result=result_summary,
+                request_json=request_json,
+                response_json=response_json,
             )
         return result
 
@@ -1033,6 +1076,8 @@ class SharedMcpGateway:
             method="list_resources",
             status="success",
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            request_json={"operation": "list_resources", "arguments": {}},
+            response_json={"count": len(resources), "resources": _to_json_payload(resources)},
         )
         return resources
 
@@ -1088,9 +1133,16 @@ class SharedMcpGateway:
                 status="exception",
                 duration_ms=round((time.perf_counter() - started) * 1000, 1),
                 error_summary=_summarize_exception(exc),
+                request_json={
+                    "operation": "read_resource",
+                    "uri": public_uri,
+                    "originalUri": original_uri,
+                },
+                response_json=_build_exception_response_json(exc),
             )
             raise
 
+        response_json = _to_json_payload(result)
         self._mark_success(f"read_resource:{connection.config.namespace}")
         self._record_transport_success(connection.config.key, source="read_resource")
         self.record_activity(
@@ -1104,6 +1156,12 @@ class SharedMcpGateway:
             downstream=connection.config.key,
             status="success",
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            request_json={
+                "operation": "read_resource",
+                "uri": public_uri,
+                "originalUri": original_uri,
+            },
+            response_json=response_json,
         )
         log_event(
             LOGGER,
@@ -1115,6 +1173,12 @@ class SharedMcpGateway:
             downstream=connection.config.key,
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
             items=len(result.contents),
+            request_json={
+                "operation": "read_resource",
+                "uri": public_uri,
+                "originalUri": original_uri,
+            },
+            response_json=response_json,
         )
         return [_to_helper_content(item) for item in result.contents]
 
@@ -1158,6 +1222,11 @@ class SharedMcpGateway:
             method="list_resource_templates",
             status="success",
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            request_json={"operation": "list_resource_templates", "arguments": {}},
+            response_json={
+                "count": len(templates),
+                "resourceTemplates": _to_json_payload(templates),
+            },
         )
         return templates
 
@@ -1196,6 +1265,8 @@ class SharedMcpGateway:
             method="list_prompts",
             status="success",
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            request_json={"operation": "list_prompts", "arguments": {}},
+            response_json={"count": len(prompts), "prompts": _to_json_payload(prompts)},
         )
         return prompts
 
@@ -1255,9 +1326,22 @@ class SharedMcpGateway:
                 status="exception",
                 duration_ms=round((time.perf_counter() - started) * 1000, 1),
                 error_summary=_summarize_exception(exc),
+                request_json={
+                    "operation": "get_prompt",
+                    "prompt": public_name,
+                    "originalPrompt": original_name,
+                    "arguments": _to_json_payload(arguments or {}),
+                },
+                response_json=_build_exception_response_json(exc),
             )
             raise
 
+        output_result = result.model_copy(
+            update={
+                "description": _prefix_description(connection.config.namespace, result.description),
+            }
+        )
+        response_json = _to_json_payload(output_result)
         self._mark_success(f"get_prompt:{public_name}")
         self._record_transport_success(connection.config.key, source="get_prompt")
         self.record_activity(
@@ -1271,6 +1355,13 @@ class SharedMcpGateway:
             downstream=connection.config.key,
             status="success",
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            request_json={
+                "operation": "get_prompt",
+                "prompt": public_name,
+                "originalPrompt": original_name,
+                "arguments": _to_json_payload(arguments or {}),
+            },
+            response_json=response_json,
         )
         log_event(
             LOGGER,
@@ -1282,12 +1373,15 @@ class SharedMcpGateway:
             downstream=connection.config.key,
             duration_ms=round((time.perf_counter() - started) * 1000, 1),
             messages=len(result.messages),
+            request_json={
+                "operation": "get_prompt",
+                "prompt": public_name,
+                "originalPrompt": original_name,
+                "arguments": _to_json_payload(arguments or {}),
+            },
+            response_json=response_json,
         )
-        return result.model_copy(
-            update={
-                "description": _prefix_description(connection.config.namespace, result.description),
-            }
-        )
+        return output_result
 
     async def heartbeat_loop(self, interval_seconds: int = HEARTBEAT_INTERVAL_SECONDS) -> None:
         """后台定时打印探活结果与运行摘要。"""
@@ -1633,6 +1727,20 @@ def _format_dashboard_time(value: int | float | str | None) -> str | None:
     return parsed.isoformat(timespec="seconds")
 
 
+def _is_dashboard_activity_path(path: str | None, gateway: "SharedMcpGateway") -> bool:
+    """判断请求路径是否属于 dashboard 自身流量。"""
+
+    if not path:
+        return False
+
+    # 1. 过滤页面、轮询接口、健康检查和 MCP 协议入口，避免把自检流量混进调用日志。
+    if path in DASHBOARD_ACTIVITY_PATHS | {"/healthz", gateway.registry.listen.path}:
+        return True
+
+    # 2. 过滤前端静态资源，否则刷新页面时 JS/CSS 请求会顶掉真实 MCP 调用记录。
+    return any(path.startswith(prefix) for prefix in DASHBOARD_ACTIVITY_PREFIXES)
+
+
 def _build_dashboard_payload(gateway: "SharedMcpGateway") -> dict[str, Any]:
     """把 health 快照整理成状态页可直接消费的数据。"""
 
@@ -1695,10 +1803,7 @@ def _build_dashboard_payload(gateway: "SharedMcpGateway") -> dict[str, Any]:
         }
         for event in gateway.recent_activity_snapshot()
         if event.get("eventType") in {"tool_call", "mcp_request"}
-        or (
-            event.get("eventType") == "http_request"
-            and event.get("path") not in DASHBOARD_ACTIVITY_PATHS | {"/healthz", gateway.registry.listen.path}
-        )
+        or (event.get("eventType") == "http_request" and not _is_dashboard_activity_path(event.get("path"), gateway))
     ]
     recent_clients = _build_recent_client_rows(recent_logs)
     gateway_info = {
@@ -1941,6 +2046,95 @@ def _get_request_context() -> RequestContext:
     """读取当前协程绑定的请求上下文；若无则返回默认占位对象。"""
 
     return REQUEST_CONTEXT.get() or RequestContext()
+
+
+def _build_http_request_json(request: Request, context: RequestContext) -> dict[str, Any]:
+    """组装 HTTP 请求记录的入参 JSON。"""
+
+    return {
+        # 1. 保留路由与查询参数，满足页面逐条查看 HTTP 调用入参。
+        "operation": "http_request",
+        "method": context.method,
+        "path": context.path,
+        "query": dict(request.query_params),
+        # 2. 保留调用端上下文，便于把页面记录和服务端日志串起来。
+        "caller": context.caller,
+        "clientIp": context.client_ip,
+        "userAgent": context.user_agent,
+        "requestId": context.request_id,
+    }
+
+
+def _build_http_response_json(
+    context: RequestContext,
+    status_code: int,
+    duration_ms: float,
+) -> dict[str, Any]:
+    """组装 HTTP 请求记录的出参 JSON。"""
+
+    return {
+        # 1. HTTP 响应日志只保留轻量结果，避免大响应体撑爆最近活动记录。
+        "operation": "http_request",
+        "status": status_code,
+        "durationMs": duration_ms,
+        # 2. 回带 requestId，方便和响应头、访问日志对齐排查。
+        "requestId": context.request_id,
+    }
+
+
+def _to_json_payload(value: Any) -> Any:
+    """把 MCP / Pydantic 对象转换成 dashboard 可直接 JSON 展示的数据。"""
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return {
+            "encoding": "base64",
+            "data": base64.b64encode(value).decode("ascii"),
+        }
+    if isinstance(value, bytearray):
+        return _to_json_payload(bytes(value))
+    if isinstance(value, dict):
+        return {str(key): _to_json_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_payload(item) for item in value]
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return model_dump(mode="json", by_alias=True)
+        except TypeError:
+            return _to_json_payload(model_dump())
+
+    return str(value)
+
+
+def _build_tool_call_request_json(
+    public_name: str,
+    original_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """组装一次 tool 调用的完整入参 JSON。"""
+
+    return {
+        # 1. 保留网关侧公开工具名，便于和 dashboard 行记录直接对齐。
+        "tool": public_name,
+        # 2. 保留下游原始工具名，便于排查命名空间映射后的真实调用目标。
+        "originalTool": original_name,
+        # 3. 保留调用参数原文；仅做 JSON 序列化适配，不再压缩成摘要。
+        "arguments": _to_json_payload(arguments or {}),
+    }
+
+
+def _build_exception_response_json(exc: BaseException) -> dict[str, Any]:
+    """把异常路径也转换成和正常出参一致的 JSON 结构。"""
+
+    return {
+        "errorType": type(exc).__name__,
+        "errorCode": _extract_error_code(exc),
+        "errorSummary": _summarize_exception(exc),
+        "tracebackSummary": _traceback_summary_from_exception(exc),
+    }
 
 
 def _summarize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -2218,6 +2412,8 @@ class RequestLoggingMiddleware:
         self.gateway.metrics.mark_http_request(context.caller)
         started = time.perf_counter()
         status_code = 500
+        # 1. 先把 HTTP 入口参数规整成 JSON，保证 dashboard 每条记录都有可查看入参。
+        request_json = _build_http_request_json(request, context)
 
         async def send_wrapper(message: Message) -> None:
             nonlocal status_code
@@ -2243,6 +2439,8 @@ class RequestLoggingMiddleware:
                 status="error",
                 duration_ms=duration_ms,
                 error_summary=_summarize_exception(exc),
+                request_json=request_json,
+                response_json=_build_exception_response_json(exc),
             )
             log_event(
                 LOGGER,
@@ -2262,6 +2460,8 @@ class RequestLoggingMiddleware:
             raise
         else:
             duration_ms = round((time.perf_counter() - started) * 1000, 1)
+            # 2. 响应侧只记录状态与耗时等元信息，避免把任意 HTTP 大响应塞进内存环形缓冲。
+            response_json = _build_http_response_json(context, status_code, duration_ms)
             self.gateway.record_activity(
                 event_type="http_request",
                 request_id=context.request_id,
@@ -2271,6 +2471,8 @@ class RequestLoggingMiddleware:
                 path=context.path,
                 status=status_code,
                 duration_ms=duration_ms,
+                request_json=request_json,
+                response_json=response_json,
             )
             log_event(
                 LOGGER,

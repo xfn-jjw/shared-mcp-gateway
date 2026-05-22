@@ -21,6 +21,11 @@ const props = defineProps({
 const selectedClientKey = ref('all')
 // 失败日志开关：用单独按钮在“全部日志 / 最近失败日志”之间切换。
 const errorOnly = ref(false)
+const jsonViewer = ref({
+  open: false,
+  title: '',
+  value: null,
+})
 
 // 当后端返回的新 IP 列表里已经没有当前选中项时，自动回退到“全部”，
 // 避免页面停留在一个已经过期的过滤条件上。
@@ -118,6 +123,40 @@ function targetLabel(log) {
   return '-'
 }
 
+function hasJson(value) {
+  return value !== null && value !== undefined
+}
+
+function formatJson(value) {
+  if (!hasJson(value)) {
+    return '-'
+  }
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function openJsonViewer(title, value) {
+  if (!hasJson(value)) {
+    return
+  }
+  jsonViewer.value = {
+    open: true,
+    title,
+    value,
+  }
+}
+
+function closeJsonViewer() {
+  jsonViewer.value = {
+    open: false,
+    title: '',
+    value: null,
+  }
+}
+
 function displayTime(value) {
   return formatGatewayTime(value)
 }
@@ -211,6 +250,7 @@ function toggleErrorOnly() {
                 <th>目标</th>
                 <th>状态</th>
                 <th>耗时</th>
+                <th>详情</th>
                 <th>错误</th>
               </tr>
             </thead>
@@ -226,12 +266,40 @@ function toggleErrorOnly() {
                   <span class="status-pill" :class="statusClass(log.status)">{{ log.status ?? '-' }}</span>
                 </td>
                 <td data-label="耗时">{{ log.durationMs ?? '-' }} ms</td>
+                <td data-label="详情" class="detail-actions">
+                  <button
+                    class="detail-button"
+                    type="button"
+                    :disabled="!hasJson(log.requestJson)"
+                    @click="openJsonViewer('调用入参', log.requestJson)"
+                  >
+                    查看入参
+                  </button>
+                  <button
+                    class="detail-button"
+                    type="button"
+                    :disabled="!hasJson(log.responseJson)"
+                    @click="openJsonViewer('调用出参', log.responseJson)"
+                  >
+                    查看出参
+                  </button>
+                </td>
                 <td data-label="错误" class="mono error-text">{{ log.errorSummary || '-' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
+    </div>
+
+    <div v-if="jsonViewer.open" class="json-modal-backdrop" @click.self="closeJsonViewer">
+      <section class="json-modal" role="dialog" aria-modal="true" :aria-label="jsonViewer.title">
+        <header class="json-modal-header">
+          <h3>{{ jsonViewer.title }}</h3>
+          <button class="modal-close" type="button" aria-label="关闭" @click="closeJsonViewer">×</button>
+        </header>
+        <pre class="json-modal-body">{{ formatJson(jsonViewer.value) }}</pre>
+      </section>
     </div>
   </section>
 </template>
@@ -245,29 +313,46 @@ function toggleErrorOnly() {
 
 .client-sidebar {
   padding: 16px;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid var(--panel-border);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: rgba(11, 16, 32, 0.25);
+  background:
+    linear-gradient(145deg, var(--glass-sheen), transparent 36%),
+    var(--panel-muted);
+  backdrop-filter: blur(16px) saturate(140%);
 }
 
 .client-card {
   width: 100%;
   text-align: left;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
-  color: #ebf0ff;
-  border-radius: 14px;
+  border: 1px solid var(--panel-border);
+  background:
+    linear-gradient(145deg, var(--glass-highlight), transparent 38%),
+    var(--panel-soft);
+  color: var(--text);
+  border-radius: 8px;
   padding: 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px) saturate(145%);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
 .client-card:hover,
 .client-card.active {
-  border-color: rgba(96, 165, 250, 0.45);
-  background: rgba(96, 165, 250, 0.12);
+  border-color: var(--panel-border-strong);
+  background:
+    linear-gradient(145deg, var(--glass-highlight), transparent 34%),
+    linear-gradient(180deg, var(--blue-soft), var(--panel-soft));
+}
+
+.client-card:hover {
+  transform: translateY(-2px);
+}
+
+.client-card.active {
+  box-shadow: var(--pressed-shadow);
 }
 
 .client-ip {
@@ -281,7 +366,7 @@ function toggleErrorOnly() {
 .selection-bar,
 .empty-state,
 .muted {
-  color: #9aa8d6;
+  color: var(--muted);
 }
 
 .client-stats {
@@ -302,7 +387,8 @@ function toggleErrorOnly() {
   gap: 12px;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, var(--glass-sheen), transparent);
 }
 
 .empty-state {
@@ -318,25 +404,32 @@ function toggleErrorOnly() {
 .filter-toggle {
   display: inline-flex;
   align-items: center;
-  border: 1px solid rgba(96, 165, 250, 0.28);
-  background: rgba(96, 165, 250, 0.08);
-  color: #d7e1ff;
+  border: 1px solid var(--panel-border-strong);
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    linear-gradient(180deg, var(--blue-strong), var(--blue-soft));
+  color: var(--button-text);
   font-size: 13px;
   border-radius: 999px;
   padding: 8px 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px) saturate(145%);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 .filter-toggle:hover {
-  border-color: rgba(96, 165, 250, 0.5);
-  background: rgba(96, 165, 250, 0.16);
+  border-color: var(--panel-border-strong);
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    var(--blue-strong);
+  transform: translateY(-1px);
 }
 
 .filter-toggle.active {
-  border-color: rgba(248, 113, 113, 0.45);
-  background: rgba(239, 68, 68, 0.14);
-  color: #ffe4e6;
+  border-color: color-mix(in srgb, var(--red) 36%, transparent);
+  background: var(--warning-soft);
+  color: var(--red-text);
 }
 
 .table-wrap {
@@ -351,16 +444,24 @@ table {
 th,
 td {
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--panel-border);
   text-align: left;
   vertical-align: top;
   font-size: 14px;
 }
 
 th {
-  color: #9aa8d6;
+  color: var(--muted);
   font-weight: 600;
   font-size: 13px;
+}
+
+tbody tr {
+  transition: background 0.16s ease;
+}
+
+tbody tr:hover {
+  background: linear-gradient(90deg, var(--glass-sheen), var(--panel-soft));
 }
 
 .mono {
@@ -376,28 +477,135 @@ th {
   font-size: 12px;
   font-weight: 700;
   border: 1px solid transparent;
+  box-shadow: inset 0 1px 0 var(--raised-edge), 0 6px 14px rgba(0, 0, 0, 0.08);
 }
 
 .status-success {
-  color: #d1fae5;
-  background: rgba(34, 197, 94, 0.12);
-  border-color: rgba(34, 197, 94, 0.28);
+  color: var(--green-text);
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 28%, transparent);
 }
 
 .status-error {
-  color: #fee2e2;
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.28);
+  color: var(--red-text);
+  background: var(--red-soft);
+  border-color: color-mix(in srgb, var(--red) 28%, transparent);
 }
 
 .status-neutral {
-  color: #dbeafe;
-  background: rgba(96, 165, 250, 0.12);
-  border-color: rgba(96, 165, 250, 0.28);
+  color: var(--button-text);
+  background: var(--blue-soft);
+  border-color: var(--panel-border-strong);
 }
 
 .error-text {
   max-width: 360px;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 168px;
+}
+
+.detail-button {
+  border: 1px solid var(--panel-border-strong);
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    linear-gradient(180deg, var(--blue-strong), var(--blue-soft));
+  color: var(--button-text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.1), inset 0 1px 0 var(--raised-edge);
+  backdrop-filter: blur(12px) saturate(145%);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.detail-button:hover:not(:disabled) {
+  border-color: var(--panel-border-strong);
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    var(--blue-strong);
+  transform: translateY(-1px);
+}
+
+.detail-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.json-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--modal-backdrop);
+  backdrop-filter: blur(10px) saturate(130%);
+}
+
+.json-modal {
+  width: min(920px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, var(--glass-highlight), transparent 34%),
+    var(--modal-bg);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  backdrop-filter: blur(20px) saturate(150%);
+}
+
+.json-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.json-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    var(--panel-soft);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.modal-close:hover {
+  background: var(--blue-soft);
+}
+
+.json-modal-body {
+  margin: 0;
+  max-height: calc(100vh - 150px);
+  padding: 18px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: color-mix(in srgb, var(--code-bg) 82%, transparent);
+  color: var(--button-text);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 @media (max-width: 1080px) {
@@ -407,7 +615,7 @@ th {
 
   .client-sidebar {
     border-right: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--panel-border);
   }
 }
 
@@ -442,7 +650,7 @@ th {
   td::before {
     content: attr(data-label);
     display: block;
-    color: #9aa8d6;
+    color: var(--muted);
     font-size: 12px;
     margin-bottom: 4px;
   }
