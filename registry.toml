@@ -87,6 +87,38 @@ args = []
 env = { OPENSPACE_HOST_SKILL_DIRS = "/opt/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/opt/OpenSpace" }
 
 [[servers]]
+# tapd：通过官方 Python 包启动 TAPD MCP Server。
+# 推荐配置 TAPD_ACCESS_TOKEN；也兼容 TAPD_API_USER + TAPD_API_PASSWORD。
+key = "tapd"
+enabled = true
+namespace = "tapd"
+language = "Python"
+description = "TAPD 研发协作管理能力，用于通过自然语言查询和管理需求、缺陷、任务、迭代等研发对象。"
+command = "/bin/bash"
+args = ["-lc", "set -e; if [ -z \"$TAPD_ACCESS_TOKEN\" ] && { [ -z \"$TAPD_API_USER\" ] || [ -z \"$TAPD_API_PASSWORD\" ]; }; then echo 'TAPD_ACCESS_TOKEN or TAPD_API_USER/TAPD_API_PASSWORD is required for tapd MCP' >&2; exit 1; fi; export TAPD_API_BASE_URL=\"${TAPD_API_BASE_URL:-https://api.tapd.cn}\" TAPD_BASE_URL=\"${TAPD_BASE_URL:-https://www.tapd.cn}\"; exec uvx mcp-server-tapd"]
+
+[[servers]]
+# xxl-job：通过 npm 包启动 XXL-JOB Admin MCP Server。
+# 该 MCP 包含触发、启动、停止调度任务等有副作用工具，生产环境建议先接测试调度中心验证权限边界。
+key = "xxl-job"
+enabled = true
+namespace = "xxl_job"
+language = "Node.js"
+description = "XXL-JOB Admin 调度中心能力，用于登录校验、分页查询任务，以及按任务 ID 触发、启动、停止调度任务。"
+command = "/bin/bash"
+args = ["-lc", "set -e; export XXL_JOB_ENV_FILE=\"${XXL_JOB_ENV_FILE:-$HOME/.xxl-job-mcp.env}\"; if [ ! -f \"$XXL_JOB_ENV_FILE\" ] && { [ -z \"${XXL_JOB_BASE_URL:-}${XXL_JOB_ADMIN_BASE_URL:-}\" ] || [ -z \"${XXL_JOB_USERNAME:-}${XXL_JOB_USER:-}\" ] || [ -z \"${XXL_JOB_PASSWORD:-}\" ]; }; then echo 'XXL_JOB_BASE_URL/XXL_JOB_USERNAME/XXL_JOB_PASSWORD or XXL_JOB_ENV_FILE is required for xxl_job MCP' >&2; exit 1; fi; exec npx -y xxl-job-mcp@1.2.0"]
+
+[[servers]]
+# 1688：宿主机直跑时直接调用本地项目入口，复用本机 OpenCLI Browser Bridge。
+key = "1688-procurement-assistant"
+enabled = true
+namespace = "1688"
+language = "Node.js"
+description = "1688采购助手插件 MCP 能力，用于检查插件状态、读写搜索历史、校验用户权限和打开批量询价弹窗。"
+command = "/bin/bash"
+args = ["-lc", "cd /Users/jervis.jiang/jervis.jiang/project/1688mcp && exec node ./src/index.js"]
+
+[[servers]]
 # chrome-devtools：通过官方 npm 包启动 Chrome DevTools MCP。
 # 宿主机直跑时默认让它按需启动本机 Chrome，并使用临时 profile 隔离会话状态。
 key = "chrome-devtools"
@@ -100,5 +132,5 @@ env = { CHROME_DEVTOOLS_ISOLATED = "true" }
 
 [local_exceptions.shared_gateway]
 # 当前由 shared-gateway 统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "chrome_devtools"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "tapd", "xxl_job", "1688", "chrome_devtools"]
 reason = "共享型 MCP 适合统一收口、统一日志与统一自检。"

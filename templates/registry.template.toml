@@ -101,6 +101,39 @@ args = []
 env = { OPENSPACE_HOST_SKILL_DIRS = "/absolute/path/to/openclaw-workspace/skills", OPENSPACE_WORKSPACE = "/absolute/path/to/OpenSpace" }
 
 [[servers]]
+# TAPD 示例：通过官方 Python 包启动 TAPD MCP Server。
+# 推荐配置 TAPD_ACCESS_TOKEN；也兼容 TAPD_API_USER + TAPD_API_PASSWORD。
+key = "tapd"
+enabled = true
+namespace = "tapd"
+language = "Python"
+description = "TAPD 研发协作管理能力。"
+command = "/bin/bash"
+args = ["-lc", "set -e; if [ -z \"$TAPD_ACCESS_TOKEN\" ] && { [ -z \"$TAPD_API_USER\" ] || [ -z \"$TAPD_API_PASSWORD\" ]; }; then echo 'TAPD_ACCESS_TOKEN or TAPD_API_USER/TAPD_API_PASSWORD is required for tapd MCP' >&2; exit 1; fi; export TAPD_API_BASE_URL=\"${TAPD_API_BASE_URL:-https://api.tapd.cn}\" TAPD_BASE_URL=\"${TAPD_BASE_URL:-https://www.tapd.cn}\"; exec uvx mcp-server-tapd"]
+
+[[servers]]
+# XXL-JOB 示例：通过 npm 包启动 XXL-JOB Admin MCP Server。
+# 凭据推荐放在 ~/.xxl-job-mcp.env，或通过环境变量注入。
+# 注意：xxl_trigger_job / xxl_start_job / xxl_stop_job 会直接影响调度中心。
+key = "xxl-job"
+enabled = true
+namespace = "xxl_job"
+language = "Node.js"
+description = "XXL-JOB Admin 调度中心能力。"
+command = "/bin/bash"
+args = ["-lc", "set -e; export XXL_JOB_ENV_FILE=\"${XXL_JOB_ENV_FILE:-$HOME/.xxl-job-mcp.env}\"; if [ ! -f \"$XXL_JOB_ENV_FILE\" ] && { [ -z \"${XXL_JOB_BASE_URL:-}${XXL_JOB_ADMIN_BASE_URL:-}\" ] || [ -z \"${XXL_JOB_USERNAME:-}${XXL_JOB_USER:-}\" ] || [ -z \"${XXL_JOB_PASSWORD:-}\" ]; }; then echo 'XXL_JOB_BASE_URL/XXL_JOB_USERNAME/XXL_JOB_PASSWORD or XXL_JOB_ENV_FILE is required for xxl_job MCP' >&2; exit 1; fi; exec npx -y xxl-job-mcp@1.2.0"]
+
+[[servers]]
+# 1688 示例：直接调用本地 1688 MCP 项目入口，复用本机 OpenCLI Browser Bridge。
+key = "1688-procurement-assistant"
+enabled = true
+namespace = "1688"
+language = "Node.js"
+description = "1688采购助手插件 MCP 能力。"
+command = "/bin/bash"
+args = ["-lc", "cd /absolute/path/to/1688mcp && exec node ./src/index.js"]
+
+[[servers]]
 # Chrome DevTools MCP 示例：通过官方 npm 包启动浏览器调试/自动化能力。
 # 宿主机直跑可让它按需启动本机 Chrome；如果要连接已有 Chrome，可设置 CHROME_DEVTOOLS_BROWSER_URL。
 key = "chrome-devtools"
@@ -114,7 +147,7 @@ env = { CHROME_DEVTOOLS_ISOLATED = "true" }
 
 [local_exceptions.shared_gateway]
 # 记录当前由 shared-gateway 统一托管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "chrome_devtools"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "openspace", "tapd", "xxl_job", "1688", "chrome_devtools"]
 reason = "共享型 MCP 统一纳管，减少多客户端重复配置。"
 
 # local_exceptions 的用途主要是“说明拓扑决策”，

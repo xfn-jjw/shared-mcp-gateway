@@ -80,6 +80,13 @@ flowchart LR
     C --> E["mysql-db"]
     C --> F["obsidian-kb"]
     C --> G["tencent-cls"]
+    C --> H["arthas"]
+    C --> I["openspace"]
+    C --> J["apifox"]
+    C --> K["tapd"]
+    C --> L["xxl-job"]
+    C --> M["1688"]
+    C --> N["chrome-devtools"]
 ```
 
 ## 运行链路说明
@@ -547,6 +554,9 @@ docker compose logs -f shared-mcp-gateway
 - `arthas`
 - `openspace`
 - `apifox`
+- `tapd`
+- `xxl-job`
+- `1688`
 - `chrome-devtools`
 
 拓扑归位说明见：`/path/to/shared-mcp-gateway/docs/mcp-topology.md`

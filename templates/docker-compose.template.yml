@@ -25,6 +25,18 @@ services:
       APIFOX_SITE_ID: ${APIFOX_SITE_ID:-}
       APIFOX_OAS: ${APIFOX_OAS:-}
       APIFOX_API_BASE_URL: ${APIFOX_API_BASE_URL:-}
+      TAPD_ACCESS_TOKEN: ${TAPD_ACCESS_TOKEN:-}
+      TAPD_API_USER: ${TAPD_API_USER:-}
+      TAPD_API_PASSWORD: ${TAPD_API_PASSWORD:-}
+      TAPD_API_BASE_URL: ${TAPD_API_BASE_URL:-https://api.tapd.cn}
+      TAPD_BASE_URL: ${TAPD_BASE_URL:-https://www.tapd.cn}
+      BOT_URL: ${BOT_URL:-}
+      XXL_JOB_BASE_URL: ${XXL_JOB_BASE_URL:-}
+      XXL_JOB_ADMIN_BASE_URL: ${XXL_JOB_ADMIN_BASE_URL:-}
+      XXL_JOB_USERNAME: ${XXL_JOB_USERNAME:-}
+      XXL_JOB_USER: ${XXL_JOB_USER:-}
+      XXL_JOB_PASSWORD: ${XXL_JOB_PASSWORD:-}
+      XXL_JOB_ENV_FILE: ${XXL_JOB_ENV_FILE:-/root/.xxl-job-mcp.env}
       # Chrome DevTools MCP 默认连接宿主机 remote-debugging Chrome。
       # Docker Desktop macOS 可用 host.docker.internal；Linux 可按需改成宿主网关地址。
       CHROME_DEVTOOLS_BROWSER_URL: ${CHROME_DEVTOOLS_BROWSER_URL:-http://host.docker.internal:9222}
@@ -37,6 +49,9 @@ services:
       CHROME_DEVTOOLS_ISOLATED: ${CHROME_DEVTOOLS_ISOLATED:-false}
       CHROME_DEVTOOLS_SLIM: ${CHROME_DEVTOOLS_SLIM:-false}
       CHROME_DEVTOOLS_MCP_EXTRA_ARGS: ${CHROME_DEVTOOLS_MCP_EXTRA_ARGS:-}
+      # 1688 MCP 如需复用宿主机 OpenCLI Browser Bridge，可保留默认代理目标。
+      OPENCLI_DAEMON_PORT: ${OPENCLI_DAEMON_PORT:-19825}
+      OPENCLI_DAEMON_PROXY_TARGET: ${OPENCLI_DAEMON_PROXY_TARGET:-host.docker.internal:19825}
     volumes:
       # 下面这些路径请替换成你自己的绝对路径。
       # 原则：
@@ -48,6 +63,10 @@ services:
       - /absolute/path/to/OpenSpace:/workspace/OpenSpace:rw
       - /absolute/path/to/openclaw-workspace:/workspace/openclaw-workspace:rw
       - /absolute/path/to/mempalace-data:/root/.mempalace:rw
+      # 1688 procurement assistant MCP 源码目录。
+      - /absolute/path/to/1688mcp:/workspace/1688mcp:ro
+      # 如需让 xxl-job-mcp 读取 env 文件，请先创建文件，再取消下一行注释。
+      # - /absolute/path/to/.xxl-job-mcp.env:/root/.xxl-job-mcp.env:ro
     healthcheck:
       # 用 healthz 做容器探活，确保“端口可连”和“网关逻辑已起来”是同一件事。
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=5).read()"]

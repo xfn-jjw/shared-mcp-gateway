@@ -20,7 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Apifox / Chrome DevTools MCP Server 通过 npm / npx 分发。
+# Apifox / 1688 / XXL-JOB / Chrome DevTools MCP Server 通过 npm / npx 分发，TAPD MCP 通过 uvx 分发。
 # Chrome DevTools MCP 要求 Node.js v20.19+，因此从官方 Node 24 镜像复制运行时，
 # 避免 Debian apt 默认 nodejs 版本不足。
 COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node
@@ -29,6 +29,12 @@ RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && 
     ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
     node --version && \
     npm --version
+
+# 1. 安装容器内 OpenCLI 与 TCP 转发工具，供 1688 MCP 复用宿主机 Browser Bridge daemon。
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends socat && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g @jackwener/opencli@1.7.22
 
 COPY requirements.txt /app/requirements-gateway.txt
 RUN python -m pip install --upgrade pip && \
@@ -53,6 +59,7 @@ RUN python -m pip install --upgrade pip && \
 
 COPY shared_mcp_gateway /app/shared_mcp_gateway
 COPY scripts /app/scripts
+RUN chmod +x /app/scripts/run_1688_mcp.sh /app/scripts/run_chrome_devtools_mcp.sh
 RUN mkdir -p /app/generated
 COPY generated/codex-mcp.toml /app/generated/codex-mcp.toml
 COPY generated/opencode-mcp.jsonc /app/generated/opencode-mcp.jsonc

@@ -101,6 +101,41 @@ command = "/bin/bash"
 args = ["-lc", "set -e; APIFOX_ARGS=''; if [ -n \"$APIFOX_PROJECT_ID\" ]; then if [ -z \"$APIFOX_ACCESS_TOKEN\" ]; then echo 'APIFOX_ACCESS_TOKEN is required when APIFOX_PROJECT_ID is set' >&2; exit 1; fi; APIFOX_ARGS=\"--project-id=$APIFOX_PROJECT_ID\"; elif [ -n \"$APIFOX_SITE_ID\" ]; then APIFOX_ARGS=\"--site-id=$APIFOX_SITE_ID\"; elif [ -n \"$APIFOX_OAS\" ]; then APIFOX_ARGS=\"--oas=$APIFOX_OAS\"; else echo 'One of APIFOX_PROJECT_ID / APIFOX_SITE_ID / APIFOX_OAS is required for apifox MCP' >&2; exit 1; fi; exec npx -y apifox-mcp-server@latest $APIFOX_ARGS ${APIFOX_API_BASE_URL:+--apifox-api-base-url=\"$APIFOX_API_BASE_URL\"}"]
 
 [[servers]]
+# tapd：通过官方 Python 包启动 TAPD MCP Server。
+# 推荐配置 TAPD_ACCESS_TOKEN；也兼容 TAPD_API_USER + TAPD_API_PASSWORD。
+# TAPD_API_BASE_URL / TAPD_BASE_URL 默认走 TAPD 公有云，可由 Compose 环境变量覆盖。
+key = "tapd"
+enabled = true
+namespace = "tapd"
+language = "Python"
+description = "TAPD 研发协作管理能力，用于通过自然语言查询和管理需求、缺陷、任务、迭代等研发对象。"
+command = "/bin/bash"
+args = ["-lc", "set -e; if [ -z \"$TAPD_ACCESS_TOKEN\" ] && { [ -z \"$TAPD_API_USER\" ] || [ -z \"$TAPD_API_PASSWORD\" ]; }; then echo 'TAPD_ACCESS_TOKEN or TAPD_API_USER/TAPD_API_PASSWORD is required for tapd MCP' >&2; exit 1; fi; export TAPD_API_BASE_URL=\"${TAPD_API_BASE_URL:-https://api.tapd.cn}\" TAPD_BASE_URL=\"${TAPD_BASE_URL:-https://www.tapd.cn}\"; exec uvx mcp-server-tapd"]
+
+[[servers]]
+# xxl-job：通过 npm 包启动 XXL-JOB Admin MCP Server。
+# 该 MCP 包含触发、启动、停止调度任务等有副作用工具，生产环境建议先接测试调度中心验证权限边界。
+# 凭据可通过 Compose 环境变量注入，也可把 env 文件挂载到容器内 /root/.xxl-job-mcp.env。
+key = "xxl-job"
+enabled = true
+namespace = "xxl_job"
+language = "Node.js"
+description = "XXL-JOB Admin 调度中心能力，用于登录校验、分页查询任务，以及按任务 ID 触发、启动、停止调度任务。"
+command = "/bin/bash"
+args = ["-lc", "set -e; for key in XXL_JOB_BASE_URL XXL_JOB_ADMIN_BASE_URL XXL_JOB_USERNAME XXL_JOB_USER XXL_JOB_PASSWORD; do if [ -z \"${!key}\" ]; then unset \"$key\"; fi; done; export XXL_JOB_ENV_FILE=\"${XXL_JOB_ENV_FILE:-/root/.xxl-job-mcp.env}\"; if [ ! -f \"$XXL_JOB_ENV_FILE\" ] && { [ -z \"${XXL_JOB_BASE_URL:-}${XXL_JOB_ADMIN_BASE_URL:-}\" ] || [ -z \"${XXL_JOB_USERNAME:-}${XXL_JOB_USER:-}\" ] || [ -z \"${XXL_JOB_PASSWORD:-}\" ]; }; then echo 'XXL_JOB_BASE_URL/XXL_JOB_USERNAME/XXL_JOB_PASSWORD or XXL_JOB_ENV_FILE is required for xxl_job MCP' >&2; exit 1; fi; exec npx -y xxl-job-mcp@1.2.0"]
+
+[[servers]]
+# 1688：本地采购助手 Chrome 插件 MCP，通过 OpenCLI Browser Bridge 与宿主机浏览器通信。
+# 容器内启动脚本会把 127.0.0.1:19825 代理到宿主机 OpenCLI daemon，源码由 Compose 挂载到 /workspace/1688mcp。
+key = "1688-procurement-assistant"
+enabled = true
+namespace = "1688"
+language = "Node.js"
+description = "1688采购助手插件 MCP 能力，用于检查插件状态、读写搜索历史、校验用户权限和打开批量询价弹窗。"
+command = "/bin/bash"
+args = ["/app/scripts/run_1688_mcp.sh"]
+
+[[servers]]
 # chrome-devtools：通过官方 npm 包启动 Chrome DevTools MCP。
 # 容器中默认连接宿主机 remote-debugging Chrome；如需容器内 Chrome，可清空 CHROME_DEVTOOLS_BROWSER_URL 并配置 executable/headless。
 key = "chrome-devtools"
@@ -113,5 +148,5 @@ args = ["/app/scripts/run_chrome_devtools_mcp.sh"]
 
 [local_exceptions.shared_gateway]
 # 当前由 shared-gateway 统一纳管的共享能力。
-managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "arthas", "openspace", "apifox", "chrome_devtools"]
+managed = ["mempalace", "mysql_db", "obsidian_kb", "tencent_cls", "arthas", "openspace", "apifox", "tapd", "xxl_job", "1688", "chrome_devtools"]
 reason = "共享型 MCP 适合统一收口、统一日志与统一自检。"

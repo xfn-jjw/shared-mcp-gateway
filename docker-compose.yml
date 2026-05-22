@@ -29,6 +29,22 @@ services:
       APIFOX_OAS: ${APIFOX_OAS:-}
       # 可选：私有化/自定义站点时覆盖 API Base URL；公有云通常留空即可。
       APIFOX_API_BASE_URL: ${APIFOX_API_BASE_URL:-}
+      # TAPD MCP 认证配置：推荐 TAPD_ACCESS_TOKEN；也支持 TAPD_API_USER + TAPD_API_PASSWORD。
+      TAPD_ACCESS_TOKEN: ${TAPD_ACCESS_TOKEN:-}
+      TAPD_API_USER: ${TAPD_API_USER:-}
+      TAPD_API_PASSWORD: ${TAPD_API_PASSWORD:-}
+      TAPD_API_BASE_URL: ${TAPD_API_BASE_URL:-https://api.tapd.cn}
+      TAPD_BASE_URL: ${TAPD_BASE_URL:-https://www.tapd.cn}
+      # 可选：企业微信群机器人 webhook，仅需要 TAPD MCP 发群消息时配置。
+      BOT_URL: ${BOT_URL:-}
+      # XXL-JOB MCP 认证配置：推荐通过 .env / --env-file 注入，避免把密码写进 registry。
+      # 如果使用包默认的 env 文件，可把宿主机 ~/.xxl-job-mcp.env 挂载到 /root/.xxl-job-mcp.env。
+      XXL_JOB_BASE_URL: ${XXL_JOB_BASE_URL:-}
+      XXL_JOB_ADMIN_BASE_URL: ${XXL_JOB_ADMIN_BASE_URL:-}
+      XXL_JOB_USERNAME: ${XXL_JOB_USERNAME:-}
+      XXL_JOB_USER: ${XXL_JOB_USER:-}
+      XXL_JOB_PASSWORD: ${XXL_JOB_PASSWORD:-}
+      XXL_JOB_ENV_FILE: ${XXL_JOB_ENV_FILE:-/root/.xxl-job-mcp.env}
       # Chrome DevTools MCP 默认连接宿主机 remote-debugging Chrome。
       # macOS Docker Desktop 可用 host.docker.internal；宿主机需先以 --remote-debugging-port=9222 启动 Chrome。
       CHROME_DEVTOOLS_BROWSER_URL: ${CHROME_DEVTOOLS_BROWSER_URL:-http://host.docker.internal:9222}
@@ -41,6 +57,9 @@ services:
       CHROME_DEVTOOLS_ISOLATED: ${CHROME_DEVTOOLS_ISOLATED:-false}
       CHROME_DEVTOOLS_SLIM: ${CHROME_DEVTOOLS_SLIM:-false}
       CHROME_DEVTOOLS_MCP_EXTRA_ARGS: ${CHROME_DEVTOOLS_MCP_EXTRA_ARGS:-}
+      # 1688 MCP 通过 OpenCLI Browser Bridge 调宿主机 Chrome 插件；默认代理到宿主机 daemon。
+      OPENCLI_DAEMON_PORT: ${OPENCLI_DAEMON_PORT:-19825}
+      OPENCLI_DAEMON_PROXY_TARGET: ${OPENCLI_DAEMON_PROXY_TARGET:-host.docker.internal:19825}
       # Arthas MCP 默认从容器访问宿主机 Arthas HTTP API；更多线上/测试 profile 可写入 /workspace/mcps/arthas-connector/.env。
       ARTHAS_DEFAULT_PROFILE: ${ARTHAS_DEFAULT_PROFILE:-local}
       ARTHAS_LOCAL_MODE: ${ARTHAS_LOCAL_MODE:-direct}
@@ -69,6 +88,10 @@ services:
       - /Users/jervis.jiang/.codex/skills:/workspace/codex-skills:ro
       # 把本地扩展 skills 一并挂入，避免容器内只看到系统 skills。
       - /Users/jervis.jiang/.local/share/agent-skills:/workspace/agent-skills:ro
+      # 1688 procurement assistant MCP 源码，容器内只读启动 stdio server。
+      - /Users/jervis.jiang/jervis.jiang/project/1688mcp:/workspace/1688mcp:ro
+      # 本机默认挂载 xxl-job-mcp env 文件；换环境时可改为环境变量注入或注释掉该挂载。
+      - /Users/jervis.jiang/.xxl-job-mcp.env:/root/.xxl-job-mcp.env:ro
       # 持久化 chroma 缓存，减少重建后的模型重复下载。
       - /Users/jervis.jiang/.cache/shared-mcp-gateway/chroma:/root/.cache/chroma:rw
     healthcheck:

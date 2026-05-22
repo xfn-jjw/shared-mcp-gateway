@@ -19,6 +19,9 @@
 | tencent-cls | `tencent_cls` | 统一日志检索能力，适合集中接入 |
 | arthas | `arthas` | JVM 运行时诊断能力，适合把安全开关、日志与熔断统一治理 |
 | apifox | `apifox` | 接口文档/项目上下文能力，适合多客户端复用同一套 API 知识入口 |
+| tapd | `tapd` | 研发协作管理能力，适合把需求、缺陷、任务、迭代等上下文统一暴露给多个编码客户端 |
+| xxl-job | `xxl_job` | 调度中心任务查询、触发、启停能力，适合统一放入可观测、可审计的共享网关，但生产环境必须先验证账号权限 |
+| 1688 procurement assistant | `1688` | 1688 采购助手插件能力，适合把搜索历史、权限检查、批量询价弹窗等浏览器插件动作统一暴露给 MCP 客户端 |
 | chrome-devtools | `chrome_devtools` | 浏览器调试、自动化、网络/性能分析能力，适合统一暴露给多个编码客户端 |
 
 这些 MCP 放进共享网关后，可以统一获得：
@@ -33,6 +36,9 @@
 | MCP | namespace | 说明 |
 | --- | --- | --- |
 | OpenSpace | `openspace` | 虽然依赖宿主工作区与技能目录，但它本身支持 stdio MCP，可以通过 env 显式注入宿主上下文后纳入 shared-gateway |
+| TAPD MCP | `tapd` | 通过 `uvx mcp-server-tapd` 运行，凭据使用 `TAPD_ACCESS_TOKEN` 或 `TAPD_API_USER` + `TAPD_API_PASSWORD` 显式注入 |
+| XXL-JOB MCP | `xxl_job` | 通过 `npx -y xxl-job-mcp@1.2.0` 运行，凭据使用 `XXL_JOB_BASE_URL` + `XXL_JOB_USERNAME` + `XXL_JOB_PASSWORD` 或 `XXL_JOB_ENV_FILE` 显式注入 |
+| 1688 MCP | `1688` | 通过 `/Users/jervis.jiang/jervis.jiang/project/1688mcp/src/index.js` 运行；容器版需要把源码挂载到 `/workspace/1688mcp`，并通过 OpenCLI daemon 访问宿主机 Chrome 插件 |
 | Chrome DevTools MCP | `chrome_devtools` | 宿主机直跑时可按需启动本机 Chrome；容器版默认通过 `CHROME_DEVTOOLS_BROWSER_URL` 连接宿主机 remote-debugging Chrome |
 
 宿主机直跑时，OpenSpace 推荐这样接入：
@@ -83,7 +89,7 @@ Chrome DevTools MCP 的容器版默认不在镜像中内置 Chrome，而是连�
 
 1. 先确认这个能力是否会被多个客户端复用。
 2. 确认它是否强依赖某个宿主工作区、本地缓存或单会话状态。
-3. 单独启动该 MCP，验证它本身是否稳定。
+3. 单独启动该 MCP，验证它本身是否稳定；如果包含触发、启停、写入等有副作用工具，先连测试环境和低权限账号。
 4. 如果判断为共享型能力，再写入 `registry.toml` / `registry.compose.toml`。
 5. 启动网关后看 `/healthz`，再执行 `scripts/self_check.py`。
 6. 最后用 `scripts/render_client_configs.py` 更新客户端配置。
