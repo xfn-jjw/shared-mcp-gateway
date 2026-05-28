@@ -6,7 +6,13 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  reconnectingServers: {
+    type: Object,
+    default: () => ({}),
+  },
 })
+
+const emit = defineEmits(['reconnect-server'])
 
 // 状态排序规则：先显示死亡，再显示存活；同状态下按 key 排序，
 // 这样页面一眼就能先看到异常 MCP。
@@ -50,9 +56,15 @@ const probeText = (server) => {
 
 const hasTools = (server) => Array.isArray(server?.tools) && server.tools.length > 0
 
+const isReconnecting = (server) => Boolean(props.reconnectingServers?.[server.key])
+
 // 打开弹窗时只记录 key，真正显示内容统一走 computed，方便响应式刷新。
 const openToolsModal = (serverKey) => {
   selectedServerKey.value = serverKey
+}
+
+const reconnectServer = (server) => {
+  emit('reconnect-server', server)
 }
 
 const closeToolsModal = () => {
@@ -90,9 +102,19 @@ const closeToolsModal = () => {
           <td data-label="熔断器">{{ server.breakerState || 'unknown' }}</td>
           <td data-label="错误 / 说明" class="mono">{{ server.errorSummary }}</td>
           <td data-label="操作">
-            <button class="tool-button" type="button" @click="openToolsModal(server.key)">
-              查看工具
-            </button>
+            <div class="action-group">
+              <button class="tool-button" type="button" @click="openToolsModal(server.key)">
+                查看工具
+              </button>
+              <button
+                class="tool-button reconnect-button"
+                :disabled="isReconnecting(server)"
+                type="button"
+                @click="reconnectServer(server)"
+              >
+                {{ isReconnecting(server) ? '重连中...' : '重连' }}
+              </button>
+            </div>
           </td>
         </tr>
       </tbody>
@@ -210,7 +232,26 @@ tbody tr:hover {
   transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
-.tool-button:hover,
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reconnect-button {
+  background:
+    linear-gradient(180deg, var(--glass-highlight), transparent 48%),
+    linear-gradient(180deg, var(--green-soft), var(--panel-soft));
+  color: var(--green-text);
+}
+
+.tool-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+  transform: none;
+}
+
+.tool-button:hover:not(:disabled),
 .close-button:hover {
   background:
     linear-gradient(180deg, var(--glass-highlight), transparent 48%),
@@ -218,7 +259,7 @@ tbody tr:hover {
   transform: translateY(-1px);
 }
 
-.tool-button:active,
+.tool-button:active:not(:disabled),
 .close-button:active {
   transform: translateY(1px);
   box-shadow: var(--pressed-shadow);

@@ -52,7 +52,7 @@ CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3
 CIRCUIT_BREAKER_OPEN_SECONDS = 60
 RECENT_ACTIVITY_LIMIT = 300
 DASHBOARD_ACTIVITY_PATHS = {"/dashboard", "/dashboard/", "/dashboard/data"}
-DASHBOARD_ACTIVITY_PREFIXES = ("/dashboard/assets/",)
+DASHBOARD_ACTIVITY_PREFIXES = ("/dashboard/assets/", "/dashboard/servers/")
 DASHBOARD_DISPLAY_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 ANSI_RESET = "\033[0m"
 ANSI_GREEN = "\033[32m"
@@ -406,6 +406,8 @@ class SharedMcpGateway:
         self._resource_index: dict[str, tuple[DownstreamConnection, str, types.Resource]] = {}
         self._template_index: dict[str, tuple[DownstreamConnection, str, types.ResourceTemplate]] = {}
         self._prompt_index: dict[str, tuple[DownstreamConnection, str, types.Prompt]] = {}
+        self._connection_admin_lock = anyio.Lock()
+        self._retired_connections: list[DownstreamConnection] = []
 
     async def start(self) -> None:
         """按配置依次连接所有启用的下游，并建立统一索引。"""
@@ -527,6 +529,126 @@ class SharedMcpGateway:
                     original_name,
                     prompt,
                 )
+
+    def _find_enabled_server(self, server_key: str) -> ServerConfig | None:
+        """按 key 或 namespace 查找已启用的下游配置，方便页面操作复用。"""
+
+        for server_config in self.registry.enabled_servers:
+            if server_config.key == server_key or server_config.namespace == server_key:
+                return server_config
+        return None
+
+    def _clear_downstream_failures(self, server_config: ServerConfig) -> None:
+        """重连成功后清掉该下游旧的失败痕迹，避免 dashboard 继续显示过期错误。"""
+
+        stale_keys = [
+            key
+            for key, state in self.failure_streaks.items()
+            if state.downstream == server_config.key
+            or key.startswith(f"heartbeat_probe:{server_config.namespace}")
+            or key.endswith(f":{server_config.namespace}")
+        ]
+        for key in stale_keys:
+            self.failure_streaks.pop(key, None)
+
+    async def reconnect_server(
+        self,
+        server_key: str,
+        *,
+        caller: str,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """手动重建单个下游 MCP 连接，并刷新统一索引。
+
+        这个入口供 dashboard 操作按钮使用。它会先按 registry 拉起新连接，
+        成功后再替换连接表，避免死亡会话或阻塞会话长期占着对外索引。
+        """
+
+        # 1. 定位目标 MCP 配置，支持页面传 key 或 namespace。
+        server_config = self._find_enabled_server(server_key)
+        if server_config is None:
+            raise ValueError(f"Unknown enabled server: {server_key}")
+
+        async with self._connection_admin_lock:
+            try:
+                # 2. 先按 registry 拉起新连接；失败时保留旧连接，避免页面操作扩大故障面。
+                connection = await DownstreamConnection.open(server_config)
+            except Exception as exc:
+                error_code = _extract_error_code(exc)
+                error_summary = _summarize_exception(exc)
+                traceback_summary = _traceback_summary_from_exception(exc)
+                existing_connection = self.connections.get(server_config.namespace)
+                if existing_connection is None:
+                    self.failed_servers[server_config.key] = f"{type(exc).__name__}: {exc}"
+                    self._record_transport_failure(
+                        server_config.key,
+                        operation="manual_reconnect",
+                        error_code=error_code,
+                        error_summary=error_summary,
+                        traceback_summary=traceback_summary,
+                    )
+                self._rebuild_indexes()
+                log_event(
+                    LOGGER,
+                    logging.ERROR,
+                    "downstream_manual_reconnect_failed",
+                    downstream=server_config.key,
+                    namespace=server_config.namespace,
+                    caller=caller,
+                    request_id=request_id,
+                    old_connection_retained=existing_connection is not None,
+                    error_code=error_code,
+                    error_summary=error_summary,
+                    traceback_summary=traceback_summary,
+                )
+                raise
+
+            # 3. 新连接成功后再替换连接表，并重建对外工具/资源索引。
+            old_connection = self.connections.get(server_config.namespace)
+            self.connections[server_config.namespace] = connection
+            self.failed_servers.pop(server_config.key, None)
+            self._clear_downstream_failures(server_config)
+            self._record_transport_success(server_config.key, source="manual_reconnect")
+            self._mark_success(f"heartbeat_probe:{server_config.namespace}")
+            self._rebuild_indexes()
+
+            # 4. 不在请求里关闭旧 stdio 连接。mcp stdio close 会向上触发 lifespan
+            # 取消，导致其他 MCP 被统一关闭；同时要保留引用，避免 async generator
+            # 被 GC 后在错误 task 里退出。
+            if old_connection is not None:
+                self._retired_connections.append(old_connection)
+                log_event(
+                    LOGGER,
+                    logging.WARNING,
+                    "downstream_manual_reconnect_old_connection_replaced",
+                    downstream=server_config.key,
+                    namespace=server_config.namespace,
+                    caller=caller,
+                    request_id=request_id,
+                    note="old stdio connection left for process-level cleanup",
+                )
+
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "downstream_manual_reconnect_done",
+                downstream=server_config.key,
+                namespace=server_config.namespace,
+                caller=caller,
+                request_id=request_id,
+                tools=len(connection.tools),
+                resources=len(connection.resources),
+                resource_templates=len(connection.resource_templates),
+                prompts=len(connection.prompts),
+            )
+            return {
+                "key": server_config.key,
+                "namespace": server_config.namespace,
+                "tools": len(connection.tools),
+                "resources": len(connection.resources),
+                "resourceTemplates": len(connection.resource_templates),
+                "prompts": len(connection.prompts),
+            }
 
     def _mark_success(self, key: str) -> None:
         """故障键恢复成功时清理 streak，并在跨阈值恢复时打印恢复日志。"""
@@ -2552,6 +2674,46 @@ async def create_app(registry: Registry) -> Starlette:
 
         return JSONResponse(_build_dashboard_payload(gateway))
 
+    async def dashboard_reconnect_server(request: Request):
+        """从 dashboard 手动重建某个下游 MCP 连接。"""
+
+        context = _get_request_context()
+        server_key = request.path_params["server_key"]
+        try:
+            result = await gateway.reconnect_server(
+                server_key,
+                caller=context.caller,
+                request_id=context.request_id,
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": _summarize_exception(exc),
+                    "dashboard": _build_dashboard_payload(gateway),
+                },
+                status_code=404,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": _summarize_exception(exc),
+                    "errorCode": _extract_error_code(exc),
+                    "tracebackSummary": _traceback_summary_from_exception(exc),
+                    "dashboard": _build_dashboard_payload(gateway),
+                },
+                status_code=500,
+            )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "server": result,
+                "dashboard": _build_dashboard_payload(gateway),
+            }
+        )
+
     async def dashboard_root(_request):
         """统一把根路径跳到 Vue 仪表盘入口。"""
 
@@ -2576,6 +2738,11 @@ async def create_app(registry: Registry) -> Starlette:
         routes=[
             Route("/", endpoint=dashboard_root, methods=["GET"]),
             Route("/dashboard/data", endpoint=dashboard_data, methods=["GET"]),
+            Route(
+                "/dashboard/servers/{server_key:str}/reconnect",
+                endpoint=dashboard_reconnect_server,
+                methods=["POST"],
+            ),
             Route("/healthz", endpoint=healthz, methods=["GET"]),
             Route(registry.listen.path, endpoint=mcp_app),
             Mount("/dashboard", app=dashboard_static, name="dashboard"),

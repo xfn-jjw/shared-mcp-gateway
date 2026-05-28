@@ -22,6 +22,7 @@ const errorMessage = ref('')
 const refreshTimer = ref(null)
 const lastRefreshAt = ref('')
 const agentAccessVisible = ref(false)
+const reconnectingServers = ref({})
 const themeOptions = [
   { key: 'custom', label: '自定义' },
   { key: 'day', label: '白天' },
@@ -203,6 +204,50 @@ function manualRefresh() {
   fetchDashboardData({ silent: false })
 }
 
+async function reconnectServer(server) {
+  // 1. 标记当前 MCP 正在重连，避免重复点击打出并发请求。
+  const serverKey = server?.key
+  if (!serverKey || reconnectingServers.value[serverKey]) {
+    return
+  }
+
+  reconnectingServers.value = {
+    ...reconnectingServers.value,
+    [serverKey]: true,
+  }
+
+  try {
+    // 2. 调用后端单 MCP 重连接口，后端负责拉起新连接并替换当前连接。
+    const response = await fetch(`/dashboard/servers/${encodeURIComponent(serverKey)}/reconnect`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: {
+        'cache-control': 'no-cache',
+      },
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`)
+    }
+
+    // 3. 使用接口返回的 dashboard 快照刷新页面，保证按钮结果立即可见。
+    if (payload.dashboard) {
+      dashboardData.value = payload.dashboard
+      lastRefreshAt.value =
+        formatRefreshTime(payload.dashboard.generatedAt) || new Date().toLocaleString('zh-CN', { hour12: false })
+    } else {
+      await fetchDashboardData({ silent: true })
+    }
+    errorMessage.value = `${serverKey} 已重新连接`
+  } catch (error) {
+    errorMessage.value = `${serverKey} 重连失败：${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    const nextState = { ...reconnectingServers.value }
+    delete nextState[serverKey]
+    reconnectingServers.value = nextState
+  }
+}
+
 function openAgentAccess() {
   agentAccessVisible.value = true
 }
@@ -370,7 +415,12 @@ onUnmounted(() => {
             <div class="skeleton-line wide" />
           </div>
         </div>
-        <ServerTable v-else :servers="dashboardData.servers" />
+        <ServerTable
+          v-else
+          :servers="dashboardData.servers"
+          :reconnecting-servers="reconnectingServers"
+          @reconnect-server="reconnectServer"
+        />
       </section>
 
       <section v-if="loading" class="panel">
