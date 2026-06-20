@@ -775,24 +775,50 @@ class SharedMcpGateway:
         return state
 
     def _record_transport_success(self, server_key: str, *, source: str) -> None:
-        """当下游恢复可用时重置熔断器状态。"""
+        """当下游恢复可用时精准更新熔断器状态。
 
-        state = self.circuit_breakers.setdefault(server_key, CircuitBreakerState())
+        只重置失败计数；只有 HALF-OPEN 状态成功才关闭熔断器。
+        OPEN 状态下即使心跳成功也不提前关闭，必须等冷却期走完。
+        """
+
+        state = self.circuit_breakers.get(server_key)
+        if state is None:
+            return
         previous_state = state.state
         previous_failures = state.failure_count
         if previous_state == "closed" and previous_failures == 0:
             return
 
-        self.circuit_breakers[server_key] = CircuitBreakerState()
-        log_event(
-            LOGGER,
-            logging.INFO,
-            "circuit_breaker_recovered",
-            downstream=server_key,
-            source=source,
-            previous_state=previous_state,
-            previous_failure_count=previous_failures,
-        )
+        # 清零失败计数，但保留熔断器对象和状态机
+        state.failure_count = 0
+
+        if previous_state == "half-open":
+            # HALF-OPEN 试探成功 → 关闭熔断器
+            state.state = "closed"
+            state.opened_at = None
+            state.open_until = None
+            state.open_until_ts = None
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "circuit_breaker_recovered",
+                downstream=server_key,
+                source=source,
+                previous_state=previous_state,
+                previous_failure_count=previous_failures,
+            )
+        elif previous_state == "open":
+            # OPEN 期间偶发成功（比如心跳侥幸通过）→ 不清状态，
+            # 等冷却期结束进入 HALF-OPEN 后再由真正的请求验证。
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "circuit_breaker_open_but_ok",
+                downstream=server_key,
+                source=source,
+                note="success in OPEN state, waiting for half-open probe",
+                remaining_seconds=state.remaining_seconds(),
+            )
 
     def _ensure_breaker_allows(
         self,
@@ -1562,6 +1588,35 @@ class SharedMcpGateway:
                     error_summary=error_summary,
                     traceback_summary=traceback_summary,
                 )
+
+        # ── Auto-heal: probe servers that failed at startup ──
+        for server_config in self.registry.enabled_servers:
+            if server_config.namespace in self.connections:
+                continue
+            breaker = self.circuit_breakers.get(server_config.key)
+            if breaker and breaker.state == "open":
+                probe_snapshot[f"{server_config.namespace}(circuit_open)"] = {
+                    "ok": False, "remainingSeconds": breaker.remaining_seconds(),
+                }
+                continue
+            try:
+                connection = await DownstreamConnection.open(server_config)
+                self.connections[server_config.namespace] = connection
+                self.failed_servers.pop(server_config.key, None)
+                self._record_transport_success(server_config.key, source="heartbeat_auto_heal")
+                self._rebuild_indexes()
+                probe_snapshot[server_config.namespace] = {"ok": True, "autoHealed": True}
+            except Exception as exc:
+                if _should_trip_circuit_breaker(exc):
+                    self._record_transport_failure(
+                        server_config.key, operation="heartbeat_auto_heal",
+                        error_code=_extract_error_code(exc),
+                        error_summary=_summarize_exception(exc),
+                        traceback_summary=_traceback_summary_from_exception(exc),
+                    )
+                probe_snapshot[f"{server_config.namespace}(failed)"] = {
+                    "ok": False, "error": f"{type(exc).__name__}: {exc}",
+                }
 
         self.last_probe_snapshot = probe_snapshot
         self.last_heartbeat_at = _now_string()
