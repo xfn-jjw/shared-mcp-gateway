@@ -8,6 +8,17 @@ import re
 import tomllib
 
 
+def _expand_env(value: str) -> str:
+    """Expand ${VAR} and ${VAR:-default} patterns in a string value."""
+    def _replace(m: re.Match) -> str:
+        var = m.group(1)
+        default = m.group(2)
+        if default is not None:
+            return os.environ.get(var, default)
+        return os.environ.get(var, m.group(0))
+    return re.sub(r'\$\{(\w+)(?::-([^}]*))?\}', _replace, value)
+
+
 @dataclass(slots=True)
 class ListenConfig:
     """网关监听配置。"""
@@ -85,6 +96,11 @@ def load_registry(path: str | Path) -> Registry:
     listen = ListenConfig(**data['listen'])
     gateway = GatewayConfig(**data['gateway'])
     servers = [ServerConfig(**item) for item in data['servers']]
+
+    # Expand env vars in server configs
+    for server in servers:
+        if server.env:
+            server.env = {k: _expand_env(v) for k, v in server.env.items()}
 
     return Registry(
         source_path=source_path,

@@ -617,16 +617,8 @@ class SharedMcpGateway:
             # 被 GC 后在错误 task 里退出。
             if old_connection is not None:
                 self._retired_connections.append(old_connection)
-                log_event(
-                    LOGGER,
-                    logging.WARNING,
-                    "downstream_manual_reconnect_old_connection_replaced",
-                    downstream=server_config.key,
-                    namespace=server_config.namespace,
-                    caller=caller,
-                    request_id=request_id,
-                    note="old stdio connection left for process-level cleanup",
-                )
+                # Fire-and-forget: close old connection after a grace period
+                asyncio.create_task(self._drain_retired_connection(old_connection, server_config.key))
 
             log_event(
                 LOGGER,
@@ -649,6 +641,20 @@ class SharedMcpGateway:
                 "resourceTemplates": len(connection.resource_templates),
                 "prompts": len(connection.prompts),
             }
+
+    async def _drain_retired_connection(self, conn, server_key: str) -> None:
+        """Close a retired downstream connection after a brief grace period."""
+        try:
+            await asyncio.sleep(5)  # let in-flight ops finish
+            await conn.close()
+            log_event(LOGGER, logging.INFO, "retired_connection_closed",
+                      downstream=server_key)
+        except Exception:
+            pass
+        finally:
+            # Remove from retired list
+            try: self._retired_connections.remove(conn)
+            except ValueError: pass
 
     def _mark_success(self, key: str) -> None:
         """故障键恢复成功时清理 streak，并在跨阈值恢复时打印恢复日志。"""
@@ -2123,6 +2129,23 @@ async def _safe_aclose(stack: AsyncExitStack, label: str) -> None:
         )
 
 
+# ── Safe env for child processes: strips secrets before forking ──
+_STRIP_ENV_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r'(?:TOKEN|KEY|SECRET|PASS(?:WORD)?|AUTH|CRED|CERT)$',
+        r'^(?:AWS_|AZURE_|GCP_|GOOGLE_|GITHUB_|GITLAB_).*(?:TOKEN|KEY|SECRET)',
+    ]
+]
+
+def _build_safe_child_env(parent_env: dict) -> dict:
+    """Return a copy of parent_env with sensitive keys stripped."""
+    safe = {}
+    for k, v in parent_env.items():
+        if any(p.search(k) for p in _STRIP_ENV_PATTERNS):
+            continue
+        safe[k] = v
+    return safe
+
 def _build_stdio_server_parameters(config: ServerConfig) -> StdioServerParameters:
     """所有下游统一走 supervisor，标准化 stderr 日志，同时不影响 stdio MCP 协议。"""
 
@@ -2141,7 +2164,7 @@ def _build_stdio_server_parameters(config: ServerConfig) -> StdioServerParameter
             json.dumps(config.env or {}, ensure_ascii=False),
         ],
         env={
-            **os.environ,
+            **_build_safe_child_env(os.environ),
             "PYTHONPATH": os.pathsep.join(
                 filter(None, [str(project_root), os.environ.get("PYTHONPATH", "")])
             ),
@@ -2801,6 +2824,9 @@ async def create_app(registry: Registry) -> Starlette:
             Route("/healthz", endpoint=healthz, methods=["GET"]),
             Route(registry.listen.path, endpoint=mcp_app),
             Mount("/dashboard", app=dashboard_static, name="dashboard"),
+            *((
+                Mount("/dbgate", app=StaticFiles(directory=dbgate_static_dir, html=True), name="dbgate"),
+            ) if (dbgate_static_dir := (registry.local_exceptions.get("shared_gateway") or {}).get("dbgate_static_dir")) else ()),
         ],
         lifespan=lifespan,
     )
