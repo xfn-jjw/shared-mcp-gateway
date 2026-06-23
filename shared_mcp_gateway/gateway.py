@@ -617,16 +617,8 @@ class SharedMcpGateway:
             # 被 GC 后在错误 task 里退出。
             if old_connection is not None:
                 self._retired_connections.append(old_connection)
-                log_event(
-                    LOGGER,
-                    logging.WARNING,
-                    "downstream_manual_reconnect_old_connection_replaced",
-                    downstream=server_config.key,
-                    namespace=server_config.namespace,
-                    caller=caller,
-                    request_id=request_id,
-                    note="old stdio connection left for process-level cleanup",
-                )
+                # Fire-and-forget: close old connection after a grace period
+                asyncio.create_task(self._drain_retired_connection(old_connection, server_config.key))
 
             log_event(
                 LOGGER,
@@ -649,6 +641,20 @@ class SharedMcpGateway:
                 "resourceTemplates": len(connection.resource_templates),
                 "prompts": len(connection.prompts),
             }
+
+    async def _drain_retired_connection(self, conn, server_key: str) -> None:
+        """Close a retired downstream connection after a brief grace period."""
+        try:
+            await asyncio.sleep(5)  # let in-flight ops finish
+            await conn.close()
+            log_event(LOGGER, logging.INFO, "retired_connection_closed",
+                      downstream=server_key)
+        except Exception:
+            pass
+        finally:
+            # Remove from retired list
+            try: self._retired_connections.remove(conn)
+            except ValueError: pass
 
     def _mark_success(self, key: str) -> None:
         """故障键恢复成功时清理 streak，并在跨阈值恢复时打印恢复日志。"""
@@ -775,24 +781,50 @@ class SharedMcpGateway:
         return state
 
     def _record_transport_success(self, server_key: str, *, source: str) -> None:
-        """当下游恢复可用时重置熔断器状态。"""
+        """当下游恢复可用时精准更新熔断器状态。
 
-        state = self.circuit_breakers.setdefault(server_key, CircuitBreakerState())
+        只重置失败计数；只有 HALF-OPEN 状态成功才关闭熔断器。
+        OPEN 状态下即使心跳成功也不提前关闭，必须等冷却期走完。
+        """
+
+        state = self.circuit_breakers.get(server_key)
+        if state is None:
+            return
         previous_state = state.state
         previous_failures = state.failure_count
         if previous_state == "closed" and previous_failures == 0:
             return
 
-        self.circuit_breakers[server_key] = CircuitBreakerState()
-        log_event(
-            LOGGER,
-            logging.INFO,
-            "circuit_breaker_recovered",
-            downstream=server_key,
-            source=source,
-            previous_state=previous_state,
-            previous_failure_count=previous_failures,
-        )
+        # 清零失败计数，但保留熔断器对象和状态机
+        state.failure_count = 0
+
+        if previous_state == "half-open":
+            # HALF-OPEN 试探成功 → 关闭熔断器
+            state.state = "closed"
+            state.opened_at = None
+            state.open_until = None
+            state.open_until_ts = None
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "circuit_breaker_recovered",
+                downstream=server_key,
+                source=source,
+                previous_state=previous_state,
+                previous_failure_count=previous_failures,
+            )
+        elif previous_state == "open":
+            # OPEN 期间偶发成功（比如心跳侥幸通过）→ 不清状态，
+            # 等冷却期结束进入 HALF-OPEN 后再由真正的请求验证。
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "circuit_breaker_open_but_ok",
+                downstream=server_key,
+                source=source,
+                note="success in OPEN state, waiting for half-open probe",
+                remaining_seconds=state.remaining_seconds(),
+            )
 
     def _ensure_breaker_allows(
         self,
@@ -1563,6 +1595,35 @@ class SharedMcpGateway:
                     traceback_summary=traceback_summary,
                 )
 
+        # ── Auto-heal: probe servers that failed at startup ──
+        for server_config in self.registry.enabled_servers:
+            if server_config.namespace in self.connections:
+                continue
+            breaker = self.circuit_breakers.get(server_config.key)
+            if breaker and breaker.state == "open":
+                probe_snapshot[f"{server_config.namespace}(circuit_open)"] = {
+                    "ok": False, "remainingSeconds": breaker.remaining_seconds(),
+                }
+                continue
+            try:
+                connection = await DownstreamConnection.open(server_config)
+                self.connections[server_config.namespace] = connection
+                self.failed_servers.pop(server_config.key, None)
+                self._record_transport_success(server_config.key, source="heartbeat_auto_heal")
+                self._rebuild_indexes()
+                probe_snapshot[server_config.namespace] = {"ok": True, "autoHealed": True}
+            except Exception as exc:
+                if _should_trip_circuit_breaker(exc):
+                    self._record_transport_failure(
+                        server_config.key, operation="heartbeat_auto_heal",
+                        error_code=_extract_error_code(exc),
+                        error_summary=_summarize_exception(exc),
+                        traceback_summary=_traceback_summary_from_exception(exc),
+                    )
+                probe_snapshot[f"{server_config.namespace}(failed)"] = {
+                    "ok": False, "error": f"{type(exc).__name__}: {exc}",
+                }
+
         self.last_probe_snapshot = probe_snapshot
         self.last_heartbeat_at = _now_string()
         status_plain, status_ansi = self._build_probe_status_line(probe_snapshot)
@@ -2068,6 +2129,23 @@ async def _safe_aclose(stack: AsyncExitStack, label: str) -> None:
         )
 
 
+# ── Safe env for child processes: strips secrets before forking ──
+_STRIP_ENV_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r'(?:TOKEN|KEY|SECRET|PASS(?:WORD)?|AUTH|CRED|CERT)$',
+        r'^(?:AWS_|AZURE_|GCP_|GOOGLE_|GITHUB_|GITLAB_).*(?:TOKEN|KEY|SECRET)',
+    ]
+]
+
+def _build_safe_child_env(parent_env: dict) -> dict:
+    """Return a copy of parent_env with sensitive keys stripped."""
+    safe = {}
+    for k, v in parent_env.items():
+        if any(p.search(k) for p in _STRIP_ENV_PATTERNS):
+            continue
+        safe[k] = v
+    return safe
+
 def _build_stdio_server_parameters(config: ServerConfig) -> StdioServerParameters:
     """所有下游统一走 supervisor，标准化 stderr 日志，同时不影响 stdio MCP 协议。"""
 
@@ -2086,7 +2164,7 @@ def _build_stdio_server_parameters(config: ServerConfig) -> StdioServerParameter
             json.dumps(config.env or {}, ensure_ascii=False),
         ],
         env={
-            **os.environ,
+            **_build_safe_child_env(os.environ),
             "PYTHONPATH": os.pathsep.join(
                 filter(None, [str(project_root), os.environ.get("PYTHONPATH", "")])
             ),
@@ -2746,6 +2824,9 @@ async def create_app(registry: Registry) -> Starlette:
             Route("/healthz", endpoint=healthz, methods=["GET"]),
             Route(registry.listen.path, endpoint=mcp_app),
             Mount("/dashboard", app=dashboard_static, name="dashboard"),
+            *((
+                Mount("/dbgate", app=StaticFiles(directory=dbgate_static_dir, html=True), name="dbgate"),
+            ) if (dbgate_static_dir := (registry.local_exceptions.get("shared_gateway") or {}).get("dbgate_static_dir")) else ()),
         ],
         lifespan=lifespan,
     )
