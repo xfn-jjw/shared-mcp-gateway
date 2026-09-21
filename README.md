@@ -1,3 +1,5 @@
+
+
 # Shared MCP Gateway
 
 统一把多个共享型 MCP Server 收口到一个 HTTP 网关里，对外提供一套稳定、可观测、可复用的 MCP 接入层，方便 Codex、OpenCode、Claude Code、OpenClaw 等客户端共同使用。
@@ -27,6 +29,7 @@
 - 为不同客户端自动打上 `caller` 标识，方便日志追踪。
 - 提供 `/healthz` 健康检查接口，查看已连接服务、失败服务、熔断状态。
 - 提供结构化 `logfmt` 日志，便于 grep、CLS、Loki 等系统检索。
+- 提供 `/dashboard/` 仪表盘，查看当前接入的 MCP 数量、存活状态、接入 IP 与对应调用日志。
 - 在下游异常时做最小隔离，避免单个 MCP Server 挂掉影响整体体验。
 - 生成客户端配置文件：
   - Codex：`generated/codex-mcp.toml`
